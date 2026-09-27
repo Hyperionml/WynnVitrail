@@ -31,6 +31,13 @@ what the next one holds.
   It is on by default, the pack compiles exactly as before either way, and the F3 screen still
   says when it is compiling.
 
+### Changed
+
+- **Shadow Reuse is off by default.** The shadow map is drawn again on every frame, as Iris draws
+  it, so the frame rate you read is the one of the same shadow work. The setting is still on the
+  engine page for anyone who wants the frames it wins, by keeping the ground of the map for one or
+  two frames. A value you already set yourself is kept.
+
 ### Fixed
 
 - **World space reflections show the blocks they reflect instead of magenta.** A pack can name one
