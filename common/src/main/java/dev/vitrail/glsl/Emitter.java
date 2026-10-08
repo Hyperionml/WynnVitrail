@@ -48,7 +48,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 		boolean distantPrologue, boolean entityWrapped, boolean linesWrapped,
 		boolean alphaEpilogue, boolean covers,
 		boolean wrapsFragment, boolean ordered, boolean namesFragDepth, boolean makesOverlayColour,
-		boolean coreProfile) {
+		boolean wynncraftAnchored, boolean coreProfile) {
 
 	private static final String VERSION = "#version 460 core";
 
@@ -764,6 +764,13 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 	 */
 	private String wynncraftEpilogue(Set<String> shadowed) {
 		if (this.maxFragmentOutput < 0) {
+			return "";
+		}
+
+		// The deferred half wrote the statements into the pack's own main instead, at an anchor
+		// GlslTranslator found there: this tail would run them a second time over the output the
+		// pack packed out of the albedo they already had. See planWynncraft.
+		if (this.wynncraftAnchored) {
 			return "";
 		}
 

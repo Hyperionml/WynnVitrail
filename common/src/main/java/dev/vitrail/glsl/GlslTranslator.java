@@ -831,6 +831,18 @@ public final class GlslTranslator {
 	/** Where the fragment stage's own {@code main} stands, once the alpha test has claimed it. */
 	private int packMainName = -1;
 
+	/**
+	 * The token the deferred Wynncraft statements were written into, or -1 where none were.
+	 * <p>
+	 * A pack whose fragment never writes its first output whole has no output to append to: it
+	 * holds an albedo in a variable and packs the gbuffer out of it component by component, which
+	 * is what a deferred pack is here. The effects belong on the variable and in the middle of the
+	 * pack's own {@code main}, before the discard it alpha-tests with and before everything it
+	 * derives from the albedo, so they are injected there and the tail the wrapper would have
+	 * written is withheld through this flag. See {@link #deferredAnchor}.
+	 */
+	private int wynncraftAnchor = -1;
+
 	/** Which function each token sits in, read while every brace is still the pack's own. */
 	private int[] regions = new int[0];
 
@@ -4406,11 +4418,233 @@ public final class GlslTranslator {
 			return;
 		}
 
+		// The deferred half: a pack that writes none of its first output whole. The legacy road,
+		// gl_FragColor or gl_FragData[0] at a literal subscript, names a slot the wrapper's tail can
+		// write as well as the pack did; a declared road that assigns its own name whole
+		// ({@code color = vec4(...)}) names one just as writable. A pack that does neither is
+		// packing a gbuffer: it holds an albedo in a variable and writes the output's components out
+		// of it, one at a time, after the discard it alpha-tests with and after everything it
+		// derives from the albedo - the material channels, the normals. WynnIris answers the same
+		// shape by injecting mid-main ({@code EntityPatcher.java:1515-1590}, the else of its
+		// resolveFragOutput), and this does the same at an anchor of its own: the statements go on
+		// the variable, and the tail is withheld so nothing runs twice. A pack with no anchor a
+		// scan can find keeps the tail, which is the wrong place but works: the albedo variable's
+		// components reach the output in the end, and the late effects beat none.
+		if (!this.legacySlotZero && (first == null || !wholeAssignmentTo(first.name()))) {
+			Anchor anchor = deferredAnchor();
+			if (anchor != null) {
+				this.wynncraftAnchor = anchor.at();
+				this.tokens.inject(anchor.at(),
+						anchor.before()
+								// After the semicolon the anchor's statement ends with, which the
+								// replacement has to put back: inject replaces the token rather
+								// than standing before one.
+								? "; " + WynncraftPatch.epilogue(this.stage, this.inputs,
+										anchor.variable(), null, false,
+										atlasSampler(asUniforms(this.samplers)))
+								// Before the if that throws the fragment away, and the if itself
+								// has to go back the same way. A semicolon after the block, which
+								// the language takes between a compound statement and whatever
+								// follows it.
+								: WynncraftPatch.epilogue(this.stage, this.inputs, anchor.variable(),
+										null, false, atlasSampler(asUniforms(this.samplers)))
+										+ "; if");
+				return;
+			}
+		}
+
 		if (this.packMainName < 0) {
 			this.packMainName = mainName();
 		}
 
 		this.wynncraftEpilogue = this.packMainName >= 0;
+	}
+
+	/**
+	 * A statement in the pack's own {@code main} the deferred Wynncraft statements are injected at.
+	 * <p>
+	 * Two anchors are looked for, and the first is the one WynnIris looks for first as well
+	 * ({@code EntityPatcher.findOverlayAnchorInMain}, {@code :1727-1758}): the statement that mixes
+	 * the entity colour over an albedo, {@code albedo.rgb = mix(albedo.rgb, entityColor.rgb,
+	 * entityColor.a)}. The effects go right after it, which is the earliest point at which the
+	 * albedo exists in its final pre-gbuffer form, and the variable the statement writes is the one
+	 * the effects take over. The <em>last</em> such statement is the answer, not the first, which is
+	 * WynnIris's choice and has a reason: a pack that mixes twice is one whose first mix is a
+	 * no-op colour space move and whose second is the overlay, and injecting between them would put
+	 * the effects under a mix WynnIris judged them above.
+	 * <p>
+	 * Where no such statement exists, the second anchor is the first {@code if} that throws a
+	 * fragment away on its albedo's alpha ({@code if (albedo.a < n) discard;}), which is WynnIris's
+	 * own fallback ({@code findAlphaDiscardAnchorInMain}) and serves the same purpose from the
+	 * other end: the effects go before it, so that a translucent limb's clamped alpha is the alpha
+	 * the pack tests against rather than a value the discard has already stopped mattering to. The
+	 * variable is the one the condition reads.
+	 * <p>
+	 * <strong>Nested statements count, and the injection follows them in.</strong> WynnIris lifts a
+	 * nested find to the top level it sits under; here the statements go exactly where the anchor
+	 * is, block nesting included, which is the same picture: a mix inside a branch runs under that
+	 * branch's condition and so do the effects, and an albedo mixed under a {@code #ifdef} the
+	 * compiler kept is one the dead-branch liveness of this engine agrees on with the pack.
+	 * <p>
+	 * Only statements of the pack's own {@code main} are looked at, live ones among them: a
+	 * declaration the header lifted is gone from the body already, and a helper function standing
+	 * outside {@code main} may mix the same mix without being the albedo the gbuffer is packed
+	 * from. The overlay variable has to be written where the effects can read it, which a local of
+	 * {@code main} is and a parameter of a helper is not.
+	 */
+	private record Anchor(String variable, int at, boolean before) {
+
+	}
+
+	/**
+	 * The anchor {@link #planWynncraft} injects the deferred statements at, or null where this
+	 * fragment has none it can name.
+	 */
+	private Anchor deferredAnchor() {
+		int brace = mainBrace();
+		if (brace < 0) {
+			return null;
+		}
+
+		int end = this.tokens.matchingBracket(brace);
+		int[] lines = this.tokens.lineNumbers();
+
+		// The overlay anchor, last of its statements: every live entityColor the main names stands
+		// in one, and each that parses is checked against the one before it, which is how the last
+		// wins without a second walk.
+		Anchor overlay = null;
+		for (int index = brace; index < end; index++) {
+			Token token = this.tokens.get(index);
+			if (!token.identifier(ENTITY_COLOR) || !this.unit.isLive(lines[index])) {
+				continue;
+			}
+
+			int stop = this.tokens.statementEnd(index);
+			String variable = stop < 0 ? null : overlayVariable(index, stop);
+			if (variable != null) {
+				overlay = new Anchor(variable, stop, true);
+			}
+		}
+
+		if (overlay != null) {
+			return overlay;
+		}
+
+		// The discard anchor, first of its kind: the albedo a pack alpha-tests with is the same one
+		// it packs the gbuffer out of, and where no overlay names it outright the test is the one
+		// place the main says which variable that is.
+		for (int index = brace; index < end; index++) {
+			Token token = this.tokens.get(index);
+			if (!token.identifier("discard") || !this.unit.isLive(lines[index])) {
+				continue;
+			}
+
+			int start = this.tokens.statementStart(index);
+			if (start < 0 || !this.tokens.get(start).identifier("if")) {
+				continue;
+			}
+
+			String variable = discardVariable(start);
+			if (variable != null) {
+				return new Anchor(variable, start, false);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * The albedo variable of the statement containing {@code mixCall}, or null where the statement
+	 * is not the overlay pattern.
+	 * <p>
+	 * The pattern is WynnIris's strict one: a member assignment of {@code .rgb} whose right side is
+	 * a {@code mix} that names the entity colour. The relaxed fallback WynnIris carries - any mix
+	 * over {@code entityColor} - is left out: without the strict form there is no left side to take
+	 * the variable from, and a guess would put the effects on a name nothing wrote.
+	 */
+	private String overlayVariable(int mixCall, int stop) {
+		int start = this.tokens.statementStart(mixCall);
+		if (start < 0) {
+			return null;
+		}
+
+		List<Integer> parts = this.tokens.significantRange(start, stop);
+		if (parts.size() < 8 || mixCall < start) {
+			return null;
+		}
+
+		// The shape: identifier . rgb = mix ( identifier . rgb , entityColor . rgb , entityColor . a )
+		// The base of the left side is the variable, and the two entityColor tokens further in are
+		// what the scan was looking for when it got here.
+		Token variable = this.tokens.get(parts.get(0));
+		if (variable.kind() != Kind.IDENTIFIER
+				|| !this.tokens.get(parts.get(1)).operator(".")
+				|| !this.tokens.get(parts.get(2)).identifier("rgb")
+				|| !this.tokens.get(parts.get(3)).operator("=")
+				|| !this.tokens.get(parts.get(4)).identifier("mix")) {
+			return null;
+		}
+
+		return variable.text();
+	}
+
+	/**
+	 * The albedo variable of the alpha test starting at {@code start}, or null where the statement
+	 * is not one.
+	 * <p>
+	 * The pattern is the pack's own spelling, {@code if (albedo.a < n)}: the variable is the first
+	 * thing inside the bracket, and its alpha is what the comparison reads. The operator itself is
+	 * not checked: a pack writing {@code >} where its discard branch sits on the false side is a
+	 * pack that still names its albedo in the one place this is looking for it.
+	 */
+	private String discardVariable(int start) {
+		// The condition alone, which is all the pattern needs: a statementEnd walk would run into
+		// the branch's own brace and give up ({@code statementEnd} refuses a brace at depth nought),
+		// while the bracket this pairs tells the range exactly where the condition closes.
+		int open = this.tokens.significantAfter(start);
+		int close = open < 0 ? -1 : this.tokens.matchingBracket(open);
+		if (close < 0) {
+			return null;
+		}
+
+		List<Integer> parts = this.tokens.significantRange(start, close);
+		if (parts.size() < 6) {
+			return null;
+		}
+
+		Token variable = this.tokens.get(parts.get(2));
+		if (variable.kind() != Kind.IDENTIFIER || !this.tokens.get(parts.get(3)).operator(".")
+				|| !this.tokens.get(parts.get(4)).identifier("a")) {
+			return null;
+		}
+
+		return variable.text();
+	}
+
+	/**
+	 * Whether the pack's own body assigns the name whole, which is what tells a declared first
+	 * output a wrapper's tail can write from one the gbuffer is packed out of.
+	 * <p>
+	 * A whole assignment is the identifier followed by {@code =} and nothing between: a member
+	 * assignment names a component and a comparison a different operator entirely, and neither
+	 * counts. The declaration itself is gone from the body by now, lifted into the header, so
+	 * every use the walk meets is a read or a write and never a declaration.
+	 */
+	private boolean wholeAssignmentTo(String name) {
+		int[] lines = this.tokens.lineNumbers();
+		for (int index = 0; index < this.tokens.size(); index++) {
+			Token token = this.tokens.get(index);
+			if (!token.identifier(name) || !this.unit.isLive(lines[index])) {
+				continue;
+			}
+
+			int next = this.tokens.significantAfter(index);
+			if (next >= 0 && this.tokens.get(next).operator("=")) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -6059,10 +6293,10 @@ public final class GlslTranslator {
 				this.volumes.read(), this.packOutputs, this.maxFragmentOutput, this.owedOutputs,
 				this.splits, this.gameTextureMatrix,
 				this.gameModelView, this.softRewrites, this.trigCalls, this.hashCalls,
-				this.packBuiltinCalls, this.mainWrapped, this.depthEpilogue, this.terrainPrologue,
-				this.distantPrologue, this.entityWrapped, this.linesWrapped, this.alphaEpilogue, this.covers,
-				wrapsFragment(), this.ordered, this.namesFragDepth, this.makesOverlayColour,
-				this.coreProfile);
+			this.packBuiltinCalls, this.mainWrapped, this.depthEpilogue, this.terrainPrologue,
+			this.distantPrologue, this.entityWrapped, this.linesWrapped, this.alphaEpilogue, this.covers,
+			wrapsFragment(), this.ordered, this.namesFragDepth, this.makesOverlayColour,
+			this.wynncraftAnchor >= 0, this.coreProfile);
 	}
 
 	/**

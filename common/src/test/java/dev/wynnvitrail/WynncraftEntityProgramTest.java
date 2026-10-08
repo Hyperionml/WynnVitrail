@@ -655,6 +655,113 @@ class WynncraftEntityProgramTest {
 		});
 	}
 
+	/**
+	 * The deferred half of the patch: a pack that never writes its first output whole.
+	 * <p>
+	 * Such a pack holds an albedo in a variable and packs the gbuffer out of it a component at a
+	 * time, after the discard it alpha-tests with and after everything it derives from the albedo.
+	 * The effects belong on the variable and in the middle of the pack's own main, at the statement
+	 * that mixes the entity colour over the albedo - which is the earliest point the albedo exists
+	 * in its final form - and the tail the wrapper would have written is withheld, or the effects
+	 * would run twice: once over the variable and once over the output the pack packed it into.
+	 * WynnIris answers the same shape the same way ({@code EntityPatcher.java:1515-1590}).
+	 */
+	@Test
+	void aDeferredPackGetsItsEffectsOnTheAlbedoVariableAtTheOverlayAnchor(@TempDir Path pack)
+			throws IOException {
+		String fragment = """
+				#version 120
+
+				uniform sampler2D texture;
+				varying vec4 texcoord;
+				varying vec4 entityColor;
+				layout(location = 0) out vec4 color;
+
+				void main() {
+				    vec4 albedo = texture2D(texture, texcoord.st);
+				    albedo.rgb = mix(albedo.rgb, entityColor.rgb, entityColor.a);
+				    if (albedo.a < 0.1) discard;
+				    color.rgb = albedo.rgb;
+				    color.a = albedo.a;
+				}
+				""";
+
+		withSwitch(SWITCH, true, () -> {
+			String text = translate(pack, fragment).get(ProgramStage.FRAGMENT);
+
+			// The decode runs in the pack's own main, which is the whole of what the deferred half
+			// is: not a wrapper around it but statements inside it, where the pack's own lighting
+			// and material extraction see the albedo the effects left.
+			assertTrue(text.contains("int wynnEffect = wynnGlintId(of_VertexColor);"),
+					"the effects were not put inside the pack's own main:\n" + text);
+
+			// The statements sit after the overlay they take the variable from and before the alpha
+			// test they have to beat, which is the one order that gives the pack the albedo the
+			// effects decided rather than the one it had already packed.
+			int overlay = text.indexOf("albedo.rgb = mix(albedo.rgb");
+			int effects = text.indexOf("int wynnEffect = wynnGlintId");
+			int discard = text.indexOf("if (albedo.a");
+			assertTrue(overlay >= 0 && effects > overlay,
+					"the effects do not follow the overlay they belong after:\n" + text);
+			assertTrue(discard < 0 || effects < discard,
+					"the effects run after the alpha test they have to beat:\n" + text);
+
+			// The variable they write is the pack's own albedo and not the output: a glint that
+			// rebuilt the output would leave the pack deriving its material channels from an
+			// albedo the effect never touched.
+			assertTrue(text.contains("albedo = wynnApplyGlint("),
+					"the glint does not rebuild the albedo:\n" + text);
+			assertTrue(text.contains("wynnPreservedTint, wynnTintStrength)"),
+					"the item tint does not write the albedo:\n" + text);
+
+			// And the tail is withheld, which is the other half of the half: a wrapper's epilogue
+			// here would run the same effects again over the output, and a body that was wrapped
+			// for nothing is one the compiler would take but the picture would not.
+			assertFalse(text.contains("ofPackMain"),
+					"the body was wrapped for an application that runs inside it:\n" + text);
+		});
+	}
+
+	/**
+	 * The same deferred shape without the overlay statement, which is the anchor WynnIris falls
+	 * back on ({@code findAlphaDiscardAnchorInMain}): the first if that throws a fragment away on
+	 * its albedo's alpha names the variable as surely as the mix did, and the statements go before
+	 * it, so that a translucent limb's clamped alpha is the alpha the pack tests against.
+	 */
+	@Test
+	void aDeferredPackWithoutAnOverlayAnchorsOnItsAlphaTest(@TempDir Path pack) throws IOException {
+		String fragment = """
+				#version 120
+
+				uniform sampler2D texture;
+				varying vec4 texcoord;
+				layout(location = 0) out vec4 color;
+
+				void main() {
+				    vec4 albedo = texture2D(texture, texcoord.st);
+				    if (albedo.a < 0.1) discard;
+				    color.rgb = albedo.rgb;
+				    color.a = albedo.a;
+				}
+				""";
+
+		withSwitch(SWITCH, true, () -> {
+			String text = translate(pack, fragment).get(ProgramStage.FRAGMENT);
+
+			// texture2D is what the pack wrote and texture is what it comes out as, the legacy
+			// spelling having been rewritten on the way up.
+			int albedo = text.indexOf("albedo = texture(ofTexture");
+			int effects = text.indexOf("int wynnEffect = wynnGlintId");
+			int discard = text.indexOf("if (albedo.a");
+			assertTrue(albedo >= 0 && effects > albedo,
+					"the effects do not follow the albedo they read:\n" + text);
+			assertTrue(discard >= 0 && effects < discard,
+					"the effects do not run before the alpha test:\n" + text);
+			assertFalse(text.contains("ofPackMain"),
+					"the body was wrapped for an application that runs inside it:\n" + text);
+		});
+	}
+
 	@Test
 	void aPackTranslatedWithThePatchOffIsUntouched(@TempDir Path pack) throws IOException {
 		withSwitch(SWITCH, false, () -> {
