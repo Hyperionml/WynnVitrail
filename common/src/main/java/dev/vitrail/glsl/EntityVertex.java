@@ -121,11 +121,22 @@ public final class EntityVertex {
 	public static final String COLOUR = "Color";
 
 	/**
+	 * The element of the mesh that carries the corner's own texture coordinate, which is the
+	 * coordinate a pack reads as {@code gl_MultiTexCoord0} and the one the Wynncraft effects sample
+	 * the item's sprite at.
+	 * <p>
+	 * Named here beside {@link #COLOUR} for the same reason: the patch copies it forward out of a
+	 * varying the pack can neither name nor write, and a spelling repeated in two places is a
+	 * spelling that can be one character wrong in one of them.
+	 */
+	public static final String TEX_COORD = "UV0";
+
+	/**
 	 * The elements of the entity mesh, in the format's own order, the six the game lays out and the
 	 * three this engine appends after them. {@code EntityMesh} is what appends them.
 	 */
 	public static final List<String> ATTRIBUTES = Stream.concat(
-			Stream.of("Position", COLOUR, "UV0", "UV1", "UV2", "Normal"), APPENDED.stream())
+			Stream.of("Position", COLOUR, TEX_COORD, "UV1", "UV2", "Normal"), APPENDED.stream())
 			.toList();
 
 	/**

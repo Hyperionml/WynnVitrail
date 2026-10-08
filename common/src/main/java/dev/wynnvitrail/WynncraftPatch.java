@@ -44,6 +44,36 @@ import java.util.List;
  */
 public final class WynncraftPatch {
 
+	/**
+	 * The uniform the effects animate on, which is the game's own day rather than a frame clock.
+	 * <p>
+	 * <strong>WynnIris drives every effect from the day and not from real time</strong>, which is
+	 * the one thing about the effects that is easy to get wrong and impossible to see in a still
+	 * picture. Its {@code iris_globalInfo.GameTime} reads like a clock and is not one: it is the
+	 * fraction of the current Minecraft day, which vanilla publishes in its own {@code Globals}
+	 * block and which WynnIris fills with {@code (level.getGameTime() % 24000 + partial) / 24000}
+	 * ({@code IrisRenderingPipeline.java:1755-1767}). The effects' own scale of three hundred
+	 * ({@code EntityPatcher.java:899}) is therefore three hundred units per game day, and the
+	 * animation starts again at dawn.
+	 * <p>
+	 * This engine's day is the same number counted in ticks: {@code render/FrameState.java:595}
+	 * takes {@code clock % 24000} and {@code uniform/values/TimeValues.java:33} publishes it as
+	 * {@code worldTime}. So the scale is three hundred over twenty-four thousand, and the two
+	 * engines' effects advance together rather than merely both advancing.
+	 * <p>
+	 * <strong>Taken into the block rather than assumed</strong>, because a program gets a block
+	 * member only when its pack declares one and the corpus is not unanimous: four of the five
+	 * packs studied write {@code uniform int worldTime} and Solas never names it.
+	 * {@code GlslTranslator.takeDayClock} is what reads this name and takes it.
+	 */
+	public static final String DAY_CLOCK = "worldTime";
+
+	/**
+	 * Three hundred units of effect time per Minecraft day, which is three hundred over the
+	 * twenty-four thousand ticks a day is.
+	 */
+	private static final String DAY_CLOCK_SCALE = "0.0125";
+
 	private WynncraftPatch() {
 	}
 
@@ -108,7 +138,21 @@ public final class WynncraftPatch {
 				&& carriesColour(stage, inputs);
 	}
 
-	/** The decode, for the header. Empty where this stage does not get it. */
+	/**
+	 * The decode, for the header, and the effect library behind it where the effects are on.
+	 * <p>
+	 * <strong>Two libraries and not one, because they answer to different switches.</strong> The
+	 * decode is what reads the signals and costs a handful of comparisons, so it is written wherever
+	 * {@link #carriesColour} is; the effect library is the picture and only the fragment stage that
+	 * is really given an application has anything to call it with. A program translated with the
+	 * effects off keeps the decode - which is what the offline test reads back - and carries none of
+	 * the effects' text.
+	 * <p>
+	 * The library is written even where {@link #epilogue} ends up withholding the call, which
+	 * happens on a program declaring no diffuse sampler: an unused function is a few hundred lines
+	 * the compiler discards, and the alternative is a header that depends on the program's samplers
+	 * as well as on the switch, which is one more thing for the translation cache to be wrong about.
+	 */
 	public static List<String> helpers(ProgramStage stage, VertexInputs inputs) {
 		if (!carriesColour(stage, inputs)) {
 			return List.of();
@@ -118,6 +162,13 @@ public final class WynncraftPatch {
 		lines.add("// WynnVitrail: the Wynncraft signal decode. See WynncraftSignals.");
 		for (String helper : WynncraftSignals.HELPERS) {
 			lines.addAll(helper.lines().toList());
+		}
+
+		if (applies(stage, inputs)) {
+			lines.add("// WynnVitrail: the Wynncraft glint effects. See WynncraftGlint.");
+			for (String helper : WynncraftGlint.HELPERS) {
+				lines.addAll(helper.lines().toList());
+			}
 		}
 
 		return List.copyOf(lines);
@@ -162,6 +213,13 @@ public final class WynncraftPatch {
 	 * place from the other direction, its glint walking the pack's AST and rewriting the assignment
 	 * that writes the output, which is the same statement this appends one to.
 	 * <p>
+	 * <strong>The glint runs first and the reduction second, and the order is a result rather than a
+	 * preference.</strong> Seven of the effects rebuild the whole pixel, alpha included, out of the
+	 * texture they read - a shine and a tint both end at the texture's own alpha - so a reduction
+	 * applied first would be undone by any of them, where a clamp applied second holds whatever the
+	 * effect left and brings it down only if it is above the target. Iris appends them in this order
+	 * as well ({@code EntityPatcher.java:1487-1488}).
+	 * <p>
 	 * The alpha is clamped to the target rather than multiplied by it, and the difference is
 	 * WynnIris's own correction rather than a preference: a pack that already carried the reduced
 	 * alpha through its own arithmetic has an alpha at or below the target and the minimum leaves it
@@ -169,22 +227,107 @@ public final class WynncraftPatch {
 	 * would take the second case below the target and the first case further below it still, and
 	 * low-level VFX disappeared under it ({@code EntityPatcher.java:2183-2186}).
 	 * <p>
-	 * The test is kept because the level of an ordinary fragment decodes to nought, and a branch
-	 * that is not taken costs a fragment of the corpus nothing; the alpha it would write is one the
-	 * minimum would not move in any case.
+	 * The tests are kept because the level of an ordinary fragment decodes to nought and the effect
+	 * of one to nought, and a branch that is not taken costs a fragment of the corpus nothing; the
+	 * alpha the reduction would write is one the minimum would not move in any case.
 	 *
-	 * @param output the name the pack's first colour output ended up with, which is its own where it
-	 *               declared one and this engine's {@code ofFragData0} where it did not
-	 * @return the statement, or empty where this stage gets no application
+	 * @param output  the name the pack's first colour output ended up with, which is its own where
+	 *                it declared one and this engine's {@code ofFragData0} where it did not
+	 * @param sampler the name this program's diffuse atlas is declared under, or {@code null} where
+	 *                it declares none, which withholds the glint and keeps the reduction
+	 * @return the statements, or empty where this stage gets no application
 	 */
-	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output) {
+	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output,
+			String sampler) {
 		if (!applies(stage, inputs)) {
 			return "";
 		}
 
-		return "{ int wynnLevel = " + WynncraftSignals.TRANSLUCENCY_NAME + "("
-				+ GlslTranslator.ENTITY_VERTEX_COLOR + "); if (wynnLevel > 0) { " + output
-				+ ".a = min(" + output + ".a, " + WynncraftSignals.ALPHA_NAME
-				+ "(wynnLevel)); } } ";
+		StringBuilder statements = new StringBuilder();
+		if (sampler != null) {
+			statements.append(glint(sampler, output));
+		}
+
+		statements.append("{ int wynnLevel = ").append(WynncraftSignals.TRANSLUCENCY_NAME)
+				.append("(").append(GlslTranslator.ENTITY_VERTEX_COLOR).append("); if (wynnLevel > 0) { ")
+				.append(output).append(".a = min(").append(output).append(".a, ")
+				.append(WynncraftSignals.ALPHA_NAME).append("(wynnLevel)); } } ");
+
+		return statements.toString();
+	}
+
+	/**
+	 * One item's glint, drawn over the colour the pack left.
+	 * <p>
+	 * <strong>Six coordinates are worked out here and none of them is the effect's own business.</strong>
+	 * WynnIris computes the same six at the same place ({@code EntityPatcher.java:894-917}) and hands
+	 * them to the library as one call, and the split is the same: this half is arithmetic about
+	 * where a sprite lies in an atlas, and the library half is what to do with it once found. They
+	 * are here rather than inside the library because they are read off the MESH - the coordinate,
+	 * the middle of the sprite - and the library takes values.
+	 * <ul>
+	 * <li><strong>The item's own coordinate</strong>, which is the mesh's and not the pack's: see
+	 * {@link GlslTranslator#ENTITY_VERTEX_UV}.</li>
+	 * <li><strong>The middle of its sprite</strong>, which is what says whether the sprite's
+	 * neighbours are a few texels away: see {@link GlslTranslator#ENTITY_VERTEX_MID_TEX}.</li>
+	 * <li><strong>The size of the texture</strong>, taken from the sampler itself, which is what
+	 * tells an atlas from an armour sheet at all: Minecraft's atlases are at least two thousand and
+	 * forty-eight pixels on a side and a dedicated texture is not.</li>
+	 * <li><strong>A per-sprite coordinate</strong>, which is the atlas coordinate folded back into
+	 * the sprite the fragment lies in - a sixteenth of the atlas each way, which is the size every
+	 * item sprite is - and then scaled. It is what the two effects that read a coordinate rather
+	 * than a sweep use.</li>
+	 * <li><strong>A radial coordinate</strong>, which is the first coordinate measured from the
+	 * middle of the polygon rather than from the sprite's origin, quartered and pushed out to eight.
+	 * What it buys is the aurora: a pattern that reads as a shape on the item rather than as a
+	 * pattern on its sprite, so that the four sides of a block of equipment carry one figure between
+	 * them instead of four.</li>
+	 * <li><strong>A screen-rate coordinate</strong>, whose scale is the derivative of the
+	 * coordinate rather than a constant, so that a pattern measured by it keeps its size on screen
+	 * however far away the item is. <strong>Nothing reads it today</strong>: it is the fifth
+	 * argument of WynnIris's own call ({@code EntityPatcher.java:910,915}) and the library's switch
+	 * never mentions it, so it is carried because the call has the same shape on both engines and
+	 * not because an effect is waiting for it. Dropping it is a change to both to make at once.</li>
+	 * </ul>
+	 * <p>
+	 * The time is the caller's own arithmetic and the reason is in {@link #DAY_CLOCK}. WynnIris's
+	 * three hundred is against a day expressed as a fraction; here the day is in ticks, so the scale
+	 * is that three hundred over twenty-four thousand.
+	 * <p>
+	 * The number is masked to thirty-one, which is WynnIris's own mask and not a guard against a
+	 * decode that ran away: five bits is what the signal's red can carry, and the mask is what makes
+	 * the thirty-second effect - the fogless piece - reachable only through the armour path that
+	 * names it directly rather than through a signal.
+	 */
+	private static String glint(String sampler, String output) {
+		String uv = GlslTranslator.ENTITY_VERTEX_UV;
+		String mid = GlslTranslator.ENTITY_VERTEX_MID_TEX;
+
+		StringBuilder code = new StringBuilder();
+		code.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
+				.append(GlslTranslator.ENTITY_VERTEX_COLOR).append("); if (wynnEffect != 0) { ");
+		code.append("vec2 wynnSize = vec2(textureSize(").append(sampler).append(", 0)); ");
+		code.append("bool wynnAtlas = max(wynnSize.x, wynnSize.y) > 2000.0; ");
+		code.append("vec2 wynnUv = ").append(uv).append("; ");
+		code.append("float wynnTime = float(").append(DAY_CLOCK).append(") * ")
+				.append(DAY_CLOCK_SCALE).append("; ");
+		code.append("vec4 wynnSample = texture(").append(sampler).append(", wynnUv); ");
+		code.append("vec2 wynnEuv; if (wynnAtlas) { ");
+		code.append("vec2 wynnSprite = fract(wynnUv * wynnSize / 16.0); ");
+		code.append("wynnEuv = (wynnSprite - 1.0) * vec2(wynnSize.x / wynnSize.y, 1.0) / 5.0; } ");
+		code.append("else { wynnEuv = (wynnUv - 1.0) * vec2(wynnSize.x / wynnSize.y, 1.0); } ");
+		code.append("vec2 wynnSuv = fract(wynnUv / (max(max(abs(dFdx(wynnUv)), abs(dFdy(wynnUv))), ")
+				.append("vec2(1e-6)) * 50.0)) * 4.0; ");
+		code.append("vec2 wynnFull = ").append(WynncraftGlint.SWEEP_UV_NAME).append("(wynnUv, ")
+				.append(mid).append(", wynnSize, wynnEuv); ");
+		code.append("vec2 wynnMid = ").append(WynncraftGlint.SWEEP_UV_NAME).append("(")
+				.append(mid).append(", ").append(mid).append(", wynnSize, vec2(0.5)); ");
+		code.append("vec2 wynnRuv = (wynnFull - wynnMid) * 0.25 + vec2(8.0); ");
+		code.append(output).append(" = ").append(WynncraftGlint.APPLY_NAME).append("(")
+				.append(sampler).append(", wynnEffect & 31, wynnUv, wynnEuv, wynnSuv, ").append(mid)
+				.append(", wynnRuv, wynnSize, wynnAtlas, wynnTime, wynnSample, ").append(output)
+				.append("); } ");
+
+		return code.toString();
 	}
 }

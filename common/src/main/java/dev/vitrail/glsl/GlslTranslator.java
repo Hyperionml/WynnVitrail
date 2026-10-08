@@ -205,6 +205,59 @@ public final class GlslTranslator {
 	public static final String ENTITY_VERTEX_COLOR = "of_VertexColor";
 
 	/**
+	 * The entity's own texture coordinate, carried from the mesh to the fragment stage as a varying
+	 * beside the colour.
+	 * <p>
+	 * <strong>Asked of the mesh and not of the pack, and that is the whole of why it exists.</strong>
+	 * A pack's fragment stage does read a coordinate, under whatever name the pack gave it, but the
+	 * Wynncraft effects have to sample the item's own sprite at the coordinate the MESH carries:
+	 * they are drawing a pattern over the texture as it lies on the model, and a coordinate the pack
+	 * has scaled, rotated or wrapped on its way through would put the pattern somewhere the server
+	 * never put it. Iris takes the same value off the same element and carries it under
+	 * {@code iris_wynncraft_texcoord} ({@code EntityPatcher.java:1258}, written to at {@code :1262}
+	 * from {@code iris_UV0}).
+	 * <p>
+	 * The name is the engine's and not a pack's, for the reason {@link #ENTITY_VERTEX_COLOR} gives:
+	 * the pack's own coordinate is a name this cannot know, so a second one is carried beside it
+	 * rather than the pack's being taken over.
+	 */
+	public static final String ENTITY_VERTEX_UV = "of_VertexUV";
+
+	/**
+	 * The middle of the sprite the polygon is mapped to, carried beside the two above.
+	 * <p>
+	 * A property of the polygon rather than of a corner, and it is what tells a sprite in the block
+	 * atlas that its neighbour begins a few texels away: a sweep measured from a sprite's own
+	 * origin restarts at every boundary, and a weapon drawn across several sprites would show the
+	 * band broken into as many pieces. {@code WynncraftGlint.wynnContinuousSweepUV} is what spends
+	 * it, and nought is what it does with a polygon that carried none - which is exactly what
+	 * {@code EntityVertex.midTexCoord} hands a pack that never declared the name.
+	 */
+	public static final String ENTITY_VERTEX_MID_TEX = "of_VertexMidTex";
+
+	/**
+	 * The values this engine carries from the entity mesh to the fragment stage for the Wynncraft
+	 * patch, each with the type both stages declare it under.
+	 * <p>
+	 * <strong>One list rather than a name per site</strong>, for the reason
+	 * {@code WynncraftSignals.HELPERS} gives about its own: three places have to agree on the set -
+	 * the fragment stage that reads them, the vertex stage that writes them, and the header that
+	 * declares them on both - and a name added to one and not the others is a stage that compiles
+	 * and draws nothing, or does not compile at all.
+	 * <p>
+	 * The types are here rather than derived because the two differ and nothing about a name says
+	 * which: the colour is four components and the coordinates are two.
+	 */
+	static final List<Carry> ENTITY_CARRY = List.of(
+			new Carry(ENTITY_VERTEX_COLOR, "vec4"),
+			new Carry(ENTITY_VERTEX_UV, "vec2"),
+			new Carry(ENTITY_VERTEX_MID_TEX, "vec2"));
+
+	/** One of {@link #ENTITY_CARRY}: a varying's name and the type both stages declare it under. */
+	record Carry(String name, String type) {
+	}
+
+	/**
 	 * The game's own overlay image, sixteen by sixteen, under a name no pack writes.
 	 * <p>
 	 * What the two coordinates mean is the game's: {@code OverlayTexture.pack} puts the white
@@ -1082,12 +1135,14 @@ public final class GlslTranslator {
 					named.add(ENTITY_COLOR);
 				}
 
-				// The entity's own colour, by the same rule as the two around it: the mesh is what
-				// carries it and the two stages have to be told together. What puts the name in
-				// `used` is the patch rather than the pack, which is the only difference - see
-				// planWynncraft, which names it into injectedNames for exactly this to find.
-				if (this.translator.used.contains(ENTITY_VERTEX_COLOR)) {
-					named.add(ENTITY_VERTEX_COLOR);
+				// The mesh's own values, by the same rule as the two around them: the mesh is what
+				// carries them and the two stages have to be told together. What puts these names
+				// in `used` is the patch rather than the pack, which is the only difference - see
+				// planWynncraft, which names them into injectedNames for exactly this to find.
+				for (Carry carried : ENTITY_CARRY) {
+					if (this.translator.used.contains(carried.name())) {
+						named.add(carried.name());
+					}
 				}
 
 				for (String identifier : ENTITY_IDS) {
@@ -1250,7 +1305,7 @@ public final class GlslTranslator {
 		memory.putAll(this.memoryQualifiers);
 		Map<String, String> formats = new LinkedHashMap<>(sharedFormats);
 		formats.putAll(this.imageFormats);
-		Emitter emitter = emitter(memory, formats);
+		Emitter emitter = emitter(memory, formats, atlasSampler(samplers));
 
 		return new TranslatedUnit(this.unit.entry(), this.stage,
 				emitter.header(block, samplers, varyings, shadowed) + body(shadowed) + "\n"
@@ -4268,11 +4323,15 @@ public final class GlslTranslator {
 			return;
 		}
 
-		this.injectedNames.add(ENTITY_VERTEX_COLOR);
+		for (Carry carried : ENTITY_CARRY) {
+			this.injectedNames.add(carried.name());
+		}
 
-		if (!WynncraftSettings.effects() || this.maxFragmentOutput < 0) {
+		if (!WynncraftPatch.applies(this.stage, this.inputs) || this.maxFragmentOutput < 0) {
 			return;
 		}
+
+		takeDayClock();
 
 		// The same gate planAlphaEpilogue carries two methods up, and for the same reason: a slot
 		// nought the pack declared under another type has no alpha to write, and .a on a vec3 is not
@@ -4288,6 +4347,38 @@ public final class GlslTranslator {
 		}
 
 		this.wynncraftEpilogue = this.packMainName >= 0;
+	}
+
+	/**
+	 * Takes the day clock into the block, on a program whose pack did not declare it.
+	 * <p>
+	 * <strong>A uniform this engine has and a pack of the corpus may not.</strong>
+	 * {@code worldTime} is published by {@code uniform/values/TimeValues} like every other engine
+	 * value, but a program gets a block member only if its pack declared one, and the packs differ:
+	 * BSL, iterationT, iterationRP and Complementary all write {@code uniform int worldTime}, and
+	 * Solas never names it. So the member is taken here rather than assumed, and a glint on Solas
+	 * would otherwise be code reading a name its own block has not got.
+	 * <p>
+	 * Asked of the block and not of the pack's text, which is the same question one step later: what
+	 * matters is whether this stage already has such a member, whichever unit it came from or
+	 * whether an include put it there. The declaration given here is the one the packs write, so a
+	 * pack that wrote it gets the member it already had and this changes nothing.
+	 * <p>
+	 * It is one of the {@code take*} family above and follows their rule: the name goes into
+	 * {@code injectedNames} as well, because the member is this engine's and the pack's body never
+	 * mentions it, so nothing else would keep it past the pass that drops what is unread.
+	 * <p>
+	 * Only the fragment stage calls it, and that is enough: the block a program is linked with is
+	 * the union of both stages' members and both are handed the same list
+	 * ({@code ProgramTranslator.render}), so the vertex stage declares what this took without asking.
+	 */
+	private void takeDayClock() {
+		if (this.blockMembers.containsKey(WynncraftPatch.DAY_CLOCK)) {
+			return;
+		}
+
+		record(this.blockMembers, WynncraftPatch.DAY_CLOCK, "int " + WynncraftPatch.DAY_CLOCK);
+		this.injectedNames.add(WynncraftPatch.DAY_CLOCK);
 	}
 
 	/**
@@ -5850,11 +5941,54 @@ public final class GlslTranslator {
 
 
 	/**
+	 * The names a pack of the corpus gives the diffuse atlas, which is the texture the game binds
+	 * the model's own image to.
+	 * <p>
+	 * <strong>A table rather than one name, because the name is the pack's.</strong> OptiFine lets a
+	 * pack call this whatever it likes and the corpus uses three spellings: {@code gtexture} on
+	 * Solas, {@code tex} on iterationT and iterationRP, and {@code texture} on BSL - which arrives
+	 * here as {@code ofTexture}, the word being reserved in modern GLSL and
+	 * {@link LegacyGlsl#RESERVED_NAMES} renaming it. The render side works off the same four for the
+	 * same reason ({@code render/GeometryProgram.java:203}).
+	 */
+	private static final Set<String> ATLAS_NAMES =
+			Set.of("gtexture", "tex", "texture", "ofTexture");
+
+	/**
+	 * Which of this stage's opaque uniforms is the diffuse atlas, or {@code null} where it declares
+	 * none.
+	 * <p>
+	 * Asked because the Wynncraft effects sample the item's own sprite, and this engine keeps the
+	 * pack's name for it where Iris renames every pack's to {@code Sampler0}: the patch can be told
+	 * which name stands for the atlas or it can be told nothing, and nothing would be a glint that
+	 * cannot draw.
+	 * <p>
+	 * The type is checked as well as the name, because a pack is free to declare a name of the list
+	 * as something else and a {@code textureSize} on a shadow sampler is not a size. The first
+	 * match wins, which is the pack's own declaration order and puts the diffuse texture first in
+	 * every program of the corpus - a pack declares it before it samples it.
+	 * <p>
+	 * A stage with none is not an error: an entity program that draws nothing textured has no sprite
+	 * to run an effect over, and the caller withholds the glint and keeps the rest of the patch.
+	 */
+	private static String atlasSampler(List<TranslatedUnit.Uniform> samplers) {
+		for (TranslatedUnit.Uniform sampler : samplers) {
+			if (ATLAS_NAMES.contains(sampler.name()) && SAMPLER_2D.equals(sampler.type())) {
+				return sampler.name();
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * The answers the header is written from, taken once every pass has run. Nothing here is
 	 * written back, which is why {@link Emitter} is handed these rather than this object.
 	 */
-	private Emitter emitter(Map<String, String> memory, Map<String, String> formats) {
-		return new Emitter(this.stage, this.inputs, this.bound, this.alphaTest, this.extensions,
+	private Emitter emitter(Map<String, String> memory, Map<String, String> formats,
+			String atlasSampler) {
+		return new Emitter(this.stage, this.inputs, this.bound, atlasSampler,
+				this.alphaTest, this.extensions,
 				this.engineDefines,
 				memory, formats, this.used, this.declaredNames,
 				this.synthesized,

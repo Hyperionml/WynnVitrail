@@ -34,7 +34,8 @@ import java.util.Set;
  * split itself; the record is built at render, which is after every pass has run and the last
  * moment any of them is written, and it is read in the one expression that builds it.
  */
-record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, AlphaTest alphaTest,
+record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, String atlasSampler,
+		AlphaTest alphaTest,
 		Set<String> extensions,
 		Map<String, String> engineDefines, Map<String, String> memoryQualifiers,
 		Map<String, String> imageFormats, Set<String> used,
@@ -358,13 +359,16 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 					+ GlslTranslator.ENTITY_COLOR + ";");
 		}
 
-		// The mesh's own vertex colour, handed on under a name of its own so that the fragment stage
-		// can read it: the pack's spelling is a macro over the {@code Color} attribute on the vertex
-		// side and nothing at all on the fragment side. GlslTranslator.ENTITY_VERTEX_COLOR carries
-		// why it is a second name and not that one, and why the two sides are told together.
-		if (varyings.contains(GlslTranslator.ENTITY_VERTEX_COLOR)) {
-			lines.add((this.stage == ProgramStage.VERTEX ? "out" : "in") + " vec4 "
-					+ GlslTranslator.ENTITY_VERTEX_COLOR + ";");
+		// The mesh's own values, handed on under names of their own so that the fragment stage can
+		// read them: the pack's spelling of the colour is a macro over the {@code Color} attribute
+		// on the vertex side and nothing at all on the fragment side, and its coordinate is a name
+		// this engine cannot know. GlslTranslator.ENTITY_CARRY carries what the three are and why
+		// the two sides are told together.
+		for (GlslTranslator.Carry carried : GlslTranslator.ENTITY_CARRY) {
+			if (varyings.contains(carried.name())) {
+				lines.add((this.stage == ProgramStage.VERTEX ? "out" : "in") + " " + carried.type()
+						+ " " + carried.name() + ";");
+			}
 		}
 
 		// And the same rule again for the three identifiers, with the qualifier the language demands
@@ -530,7 +534,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 				+ (this.distantPrologue ? DistantVertex.PROLOGUE + "(); " : "")
 				+ overlayPrologue()
 				+ identifierPrologue(varyings)
-				+ vertexColourPrologue()
+				+ carryPrologue()
 				+ (wrapsFragment() ? GlslTranslator.ORDER_OUTPUTS + "(); " : "")
 				+ coveragePrologue()
 				+ owedPrologue()
@@ -663,15 +667,16 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 	}
 
 	/**
-	 * Hands the mesh's own vertex colour on to the fragment stage, on the vertex stage and ahead of
-	 * the pack's body.
+	 * Hands the mesh's own colour and coordinates on to the fragment stage, on the vertex stage and
+	 * ahead of the pack's body.
 	 * <p>
-	 * <strong>Out of the element and not out of the name the pack reads.</strong> With the Wynncraft
-	 * patch on, that name has been redefined to hide the signal from the pack
-	 * ({@code WynncraftPatch.neutralisation}), and the whole point of this varying is to carry what
+	 * <strong>Out of the elements and not out of the names the pack reads.</strong> With the
+	 * Wynncraft patch on, the colour's name has been redefined to hide the signal from the pack
+	 * ({@code WynncraftPatch.neutralisation}), and the whole point of the varying is to carry what
 	 * was hidden: the decode in the fragment stage reads it to find the effect whose number the pack
 	 * was just stopped from seeing. Iris carries the same value under {@code iris_Color} for the same
-	 * reason.
+	 * reason. The coordinate has no name of the pack's to copy from at all - a pack's own varying is
+	 * whatever the pack called it, and the effects need the coordinate the MESH carries.
 	 * <p>
 	 * <strong>Ahead of the body, as Iris writes it</strong> ({@code prependMainFunctionBody} beside
 	 * its {@code vaColor} rename, {@code VanillaCoreTransformer.java:462-506}) rather than with the
@@ -681,16 +686,24 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 	 * something a vertex stage of the corpus does, and an assignment below one would be an assignment
 	 * that sometimes does not happen, which is a varying the fragment stage reads as undefined.
 	 * <p>
-	 * Empty on the fragment stage, where there is nothing to copy from. The varying is declared on
+	 * Empty on the fragment stage, where there is nothing to copy from. Each varying is declared on
 	 * both sides and written on one, which is what a varying is.
 	 */
-	private String vertexColourPrologue() {
+	private String carryPrologue() {
 		if (this.stage != ProgramStage.VERTEX
 				|| !WynncraftPatch.carriesColour(this.stage, this.inputs)) {
 			return "";
 		}
 
-		return GlslTranslator.ENTITY_VERTEX_COLOR + " = " + EntityVertex.COLOUR + "; ";
+		StringBuilder assignments = new StringBuilder();
+		assignments.append(GlslTranslator.ENTITY_VERTEX_COLOR).append(" = ")
+				.append(EntityVertex.COLOUR).append("; ");
+		assignments.append(GlslTranslator.ENTITY_VERTEX_UV).append(" = ")
+				.append(EntityVertex.TEX_COORD).append("; ");
+		assignments.append(GlslTranslator.ENTITY_VERTEX_MID_TEX).append(" = ")
+				.append(EntityVertex.MID_TEX_COORD).append("; ");
+
+		return assignments.toString();
 	}
 
 	/**
@@ -703,13 +716,17 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 	 * <p>
 	 * The statement names what the pack's first colour output ended up as, which is its own name
 	 * where it declared one: this is text of ours standing in the pack's own {@code main}, so the
-	 * body's write is under whichever name that body kept.
+	 * body's write is under whichever name that body kept. The atlas sampler travels with it for the
+	 * reason {@code GlslTranslator.atlasSampler} gives, and is {@code null} on a program that
+	 * declares none, where the glint has no sprite to draw over and only the reduction is emitted.
 	 * <p>
 	 * Refused where the stage has no colour output at all, which is a stage with nothing for the
 	 * application to write, and where the one it has is not a {@code vec4}. The first is refused by
 	 * {@link GlslTranslator#planWynncraft} as well, which is what covers a body wrapped for another
 	 * reason, a split most of all; {@code WynncraftPatch.mayWriteAlpha} carries what the second is
-	 * about and why the alpha test asks the same question.
+	 * about and why the alpha test asks the same question. The second keeps the glint out too,
+	 * because an effect rebuilds the whole pixel - colour and alpha together - and there is no
+	 * fourth thing to put back into a slot holding three.
 	 */
 	private String wynncraftEpilogue(Set<String> shadowed) {
 		if (this.maxFragmentOutput < 0) {
@@ -722,7 +739,8 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 			return "";
 		}
 
-		return WynncraftPatch.epilogue(this.stage, this.inputs, outputName(0, shadowed));
+		return WynncraftPatch.epilogue(this.stage, this.inputs, outputName(0, shadowed),
+				this.atlasSampler);
 	}
 
 	/** What output {@code slot} is called, which is the pack's own name when it declared one. */

@@ -86,6 +86,22 @@ class WynncraftEntityProgramTest {
 			assertTrue(fragment.contains("in vec4 of_VertexColor;"),
 					"the fragment stage cannot see the colour:\n" + fragment);
 
+			// The other two the mesh carries, which the effects read a coordinate off. Both are
+			// asked of the mesh rather than of the pack - a pack's own coordinate is whatever the
+			// pack called it - so both have to be declared on both sides and filled on one.
+			assertTrue(vertex.contains("out vec2 of_VertexUV;"),
+					"the vertex stage does not hand the coordinate on:\n" + vertex);
+			assertTrue(fragment.contains("in vec2 of_VertexUV;"),
+					"the fragment stage cannot see the coordinate:\n" + fragment);
+			assertTrue(vertex.contains("out vec2 of_VertexMidTex;"),
+					"the vertex stage does not hand the middle of the sprite on:\n" + vertex);
+			assertTrue(fragment.contains("in vec2 of_VertexMidTex;"),
+					"the fragment stage cannot see the middle of the sprite:\n" + fragment);
+			assertTrue(vertex.contains("of_VertexUV = UV0;"),
+					"the coordinate is declared and never filled:\n" + vertex);
+			assertTrue(vertex.contains("of_VertexMidTex = MidTexCoord;"),
+					"the sprite's middle is declared and never filled:\n" + vertex);
+
 			// The copy that fills it, out of the mesh's own element rather than out of the name the
 			// pack reads: that name has just been redefined to hide the signal, and this varying is
 			// the only place it survives.
@@ -134,6 +150,100 @@ class WynncraftEntityProgramTest {
 	}
 
 	/**
+	 * The glint, which is what the decode is for.
+	 * <p>
+	 * Read as text like everything else here, and the things worth reading are the ones a build
+	 * cannot tell: that the library is written into the header at all, that the call reaches it with
+	 * the sampler this program really declares rather than with the name the library takes it under,
+	 * that the number comes off the varying the vertex stage filled, and that the three parts of the
+	 * call are in the order that makes the picture.
+	 * <p>
+	 * The pack declares its diffuse texture as {@code texture}, which is the word modern GLSL
+	 * reserves and the translator renames, so the name the call has to carry is {@code ofTexture}:
+	 * an assertion on that spelling is an assertion that the sampler was found in the program rather
+	 * than guessed.
+	 */
+	@Test
+	void theGlintIsDrawnOverAnItemThatCarriesASignal(@TempDir Path pack) throws IOException {
+		withSwitch("wynnvitrail.enabled", true, () -> {
+			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
+
+			assertNotNull(fragment);
+
+			// The library, in the header, because the wrapper that calls it is written below the
+			// body. One function out of the seventeen is named as the witness, and the two the
+			// switch dispatches on are named because a library without them is a call that does not
+			// compile.
+			assertTrue(fragment.contains("vec4 wynnApplyGlint(sampler2D wynnTex,"),
+					"the fragment stage has no glint library:\n" + fragment);
+			assertTrue(fragment.contains("const float wynnGlintBrightness = 1.10;"),
+					"the glint's brightness is not the setting it was measured at:\n" + fragment);
+
+			// The number, off the varying and not off a uniform: this is the whole of what the
+			// vertex-side neutralisation exists to preserve.
+			assertTrue(fragment.contains("int wynnEffect = wynnGlintId(of_VertexColor);"),
+					"the effect number is not read off the carried colour:\n" + fragment);
+
+			// The call, with the program's own sampler name in the first argument.
+			assertTrue(fragment.contains("wynnApplyGlint(ofTexture, wynnEffect & 31, "),
+					"the library is written and never called with this program's texture:\n"
+							+ fragment);
+
+			// The day the effects animate on, taken into the block because a pack of the corpus may
+			// not declare it, and scaled from ticks to the three hundred units a day WynnIris uses.
+			assertTrue(fragment.contains("int worldTime;"),
+					"the day clock is read and never declared:\n" + fragment);
+			assertTrue(fragment.contains("float(worldTime) * 0.0125"),
+					"the clock is read in the wrong unit:\n" + fragment);
+
+			// The order, which is the one thing about the pair that a still picture could not show:
+			// the glint runs first and the reduction second, because seven of the effects rebuild
+			// the alpha out of the texture and would undo a reduction applied before them.
+			assertTrue(fragment.indexOf("wynnApplyGlint(ofTexture,")
+							< fragment.indexOf("wynnTranslucency(of_VertexColor)"),
+					"the reduction runs before the glint that would overwrite it:\n" + fragment);
+
+			// And both after the pack's own body, which is the seam the whole patch hangs off.
+			assertTrue(fragment.indexOf("ofPackMain();") < fragment.indexOf("wynnApplyGlint(ofTexture,"),
+					"the glint runs before the pack has decided anything:\n" + fragment);
+		});
+	}
+
+	/**
+	 * A program that declares no diffuse texture.
+	 * <p>
+	 * The glint has nothing to draw over there - it samples the item's own sprite and reads the
+	 * texture's size to know whether it is looking at an atlas - so the call is withheld. What is
+	 * NOT withheld is the reduction, which reads the carried colour alone, and that is the point of
+	 * the split: a program that cannot take one half of the patch still gets the other rather than
+	 * losing both.
+	 */
+	@Test
+	void aProgramWithNoDiffuseTextureStillGetsTheReduction(@TempDir Path pack) throws IOException {
+		String fragment = """
+				#version 120
+
+				uniform sampler2D colortex1;
+				varying vec4 texcoord;
+
+				void main() {
+				    gl_FragData[0] = vec4(1.0);
+				}
+				""";
+
+		withSwitch("wynnvitrail.enabled", true, () -> {
+			String text = translate(pack, fragment).get(ProgramStage.FRAGMENT);
+
+			assertTrue(text.contains("wynnTranslucency(of_VertexColor)"),
+					"the reduction was dropped with the glint:\n" + text);
+			// The declaration is in the header either way and is not what is asked about; the call
+			// is the assignment, and it is the one that must not be there.
+			assertFalse(text.contains("= wynnApplyGlint("),
+					"the glint was called on a program with no sprite to draw over:\n" + text);
+		});
+	}
+
+	/**
 	 * A pack whose own slot nought is not a {@code vec4}.
 	 * <p>
 	 * The application writes the alpha of the pack's first colour output, and {@code .a} on a
@@ -167,6 +277,8 @@ class WynncraftEntityProgramTest {
 							+ text.get(ProgramStage.FRAGMENT));
 			assertFalse(text.get(ProgramStage.FRAGMENT).contains("wynnTranslucency(of_VertexColor)"),
 					"the alpha of a vec3 was written:\n" + text.get(ProgramStage.FRAGMENT));
+			assertFalse(text.get(ProgramStage.FRAGMENT).contains("= wynnApplyGlint("),
+					"the glint was drawn into a vec3:\n" + text.get(ProgramStage.FRAGMENT));
 			assertFalse(text.get(ProgramStage.FRAGMENT).contains("ofPackMain"),
 					"the body was wrapped for an application that was refused:\n"
 							+ text.get(ProgramStage.FRAGMENT));
