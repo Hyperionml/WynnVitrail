@@ -79,6 +79,23 @@ public final class WynncraftPatch {
 	}
 
 	/**
+	 * Whether the alpha of the stage's first colour output may be written - false for a pack that
+	 * declared it as anything but a {@code vec4}.
+	 * <p>
+	 * The same gate and the same reason the alpha test carries one
+	 * ({@code GlslTranslator.planAlphaEpilogue}): the alpha of a self declared slot nought is not an
+	 * alpha, it is whatever the pack packed there, and {@code .a} on a {@code vec3} is not even a
+	 * name the language has. A pack that declares one keeps its picture and loses the reduction,
+	 * which is the right way round for an effect that is decoration on top of one.
+	 *
+	 * @param declared the type the pack declared its slot nought output under, or {@code null} where
+	 *                 it declared none and the header writes a {@code vec4} of this engine's own
+	 */
+	public static boolean mayWriteAlpha(String declared) {
+		return declared == null || declared.equals("vec4");
+	}
+
+	/**
 	 * Whether this stage hides the signals from the pack's own colour reads.
 	 * <p>
 	 * The vertex stage alone, because that is where the colour is read: a pack's own tint comes off

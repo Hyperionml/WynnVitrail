@@ -4274,6 +4274,15 @@ public final class GlslTranslator {
 			return;
 		}
 
+		// The same gate planAlphaEpilogue carries two methods up, and for the same reason: a slot
+		// nought the pack declared under another type has no alpha to write, and .a on a vec3 is not
+		// a name at all. The varying stays declared and written - the two sides are told together
+		// whatever either of them does with the value - and only the wrapper is withheld.
+		Output first = this.packOutputs.get(0);
+		if (!WynncraftPatch.mayWriteAlpha(first == null ? null : first.type())) {
+			return;
+		}
+
 		if (this.packMainName < 0) {
 			this.packMainName = mainName();
 		}

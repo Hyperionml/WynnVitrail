@@ -706,11 +706,19 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 	 * body's write is under whichever name that body kept.
 	 * <p>
 	 * Refused where the stage has no colour output at all, which is a stage with nothing for the
-	 * application to write. {@link GlslTranslator#planWynncraft} refuses the wrapper in the same
-	 * case; this one is what covers a body wrapped for another reason, a split most of all.
+	 * application to write, and where the one it has is not a {@code vec4}. The first is refused by
+	 * {@link GlslTranslator#planWynncraft} as well, which is what covers a body wrapped for another
+	 * reason, a split most of all; {@code WynncraftPatch.mayWriteAlpha} carries what the second is
+	 * about and why the alpha test asks the same question.
 	 */
 	private String wynncraftEpilogue(Set<String> shadowed) {
 		if (this.maxFragmentOutput < 0) {
+			return "";
+		}
+
+		Output first = this.packOutputs.get(0);
+		String declared = first == null ? null : first.type();
+		if (!WynncraftPatch.mayWriteAlpha(declared)) {
 			return "";
 		}
 

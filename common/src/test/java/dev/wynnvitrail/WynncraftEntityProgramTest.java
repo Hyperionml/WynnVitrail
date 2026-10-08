@@ -133,10 +133,50 @@ class WynncraftEntityProgramTest {
 		});
 	}
 
+	/**
+	 * A pack whose own slot nought is not a {@code vec4}.
+	 * <p>
+	 * The application writes the alpha of the pack's first colour output, and {@code .a} on a
+	 * {@code vec3} is not a name the language has: emitted anyway, this is a module the compiler
+	 * refuses, and the whole pass is lost over an effect that is decoration on top of one. The alpha
+	 * test carries the same gate for the same reason, so what is checked here is that the two agree.
+	 * <p>
+	 * The varying is still declared on both sides, which is the other half of it: what the two
+	 * stages are told has to be one answer whatever either of them does with the value, or a
+	 * location moves.
+	 */
+	@Test
+	void anOutputThatIsNotAVec4IsLeftAloneRatherThanWritten(@TempDir Path pack) throws IOException {
+		String fragment = """
+				#version 120
+
+				uniform sampler2D texture;
+				varying vec4 texcoord;
+				layout(location = 0) out vec3 fragColor;
+
+				void main() {
+				    fragColor = texture2D(texture, texcoord.st).rgb;
+				}
+				""";
+
+		withSwitch("wynnvitrail.enabled", true, () -> {
+			Map<ProgramStage, String> text = translate(pack, fragment);
+
+			assertTrue(text.get(ProgramStage.FRAGMENT).contains("in vec4 of_VertexColor;"),
+					"the varying was dropped with the application:\n"
+							+ text.get(ProgramStage.FRAGMENT));
+			assertFalse(text.get(ProgramStage.FRAGMENT).contains("wynnTranslucency(of_VertexColor)"),
+					"the alpha of a vec3 was written:\n" + text.get(ProgramStage.FRAGMENT));
+			assertFalse(text.get(ProgramStage.FRAGMENT).contains("ofPackMain"),
+					"the body was wrapped for an application that was refused:\n"
+							+ text.get(ProgramStage.FRAGMENT));
+		});
+	}
+
 	@Test
 	void aPackTranslatedWithThePatchOffIsUntouched(@TempDir Path pack) throws IOException {
 		withSwitch("wynnvitrail.enabled", false, () -> {
-			Map<ProgramStage, String> text = translate(pack);
+			Map<ProgramStage, String> text = translate(pack, FRAGMENT);
 
 			// The whole of the patch, by the one substring every line of it carries. A pack that
 			// asked for none of this must come out of the translator exactly as it went in, which is
@@ -150,11 +190,16 @@ class WynncraftEntityProgramTest {
 		});
 	}
 
-	/** What both stages of the program came out as, by stage. */
+	/** What both stages of the program came out as, by stage, over the entity fragment above. */
 	private static Map<ProgramStage, String> translate(Path pack) throws IOException {
+		return translate(pack, FRAGMENT);
+	}
+
+	/** The same, over a fragment of the caller's choosing. */
+	private static Map<ProgramStage, String> translate(Path pack, String fragment) throws IOException {
 		Path shaders = Files.createDirectories(pack.resolve("shaders"));
 		Files.writeString(shaders.resolve("gbuffers_entity.vsh"), VERTEX, StandardCharsets.UTF_8);
-		Files.writeString(shaders.resolve("gbuffers_entity.fsh"), FRAGMENT, StandardCharsets.UTF_8);
+		Files.writeString(shaders.resolve("gbuffers_entity.fsh"), fragment, StandardCharsets.UTF_8);
 
 		var loaded = PackProgram.load(pack, "gbuffers_entity", VertexInputs.ENTITY, Map.of(), "");
 		assertTrue(loaded.isPresent(), "the program did not load");
