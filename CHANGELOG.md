@@ -11,6 +11,49 @@ publishing a jar named after one thing and built from another.
 Everything is a pre-release while the version stays under `1.0.0`. Nothing here is a promise about
 what the next one holds.
 
+## 0.12.0-beta-wynn2
+
+The Wynncraft half of the fork, one revision on from the first jar. Everything below is aimed at a
+player on Wynncraft; on any other world none of it can fire, because none of it can find the
+signals it reads.
+
+### Added
+
+- **The scene under a Wynncraft sky is drawn with it.** Four of the seven skies Wynncraft paints
+  darken and tint the world they hang over, and the world used to keep its own colour under them -
+  a storm's mood stopped at the edge of the dome. The colour of the sky a player is under is now
+  read off the dome itself, followed through a fade in and out, and spread over the terrain as an
+  ambient shift, a darkening that spares what is already dark, and a fog that heads towards the sky
+  in the direction each piece of ground lies in. A player who wonders which sky the mod thinks they
+  are under will find it said in the log every time it changes.
+- **Entities are lifted back out of that darkening.** A mob in a storm was being darkened along
+  with the ground it stood on, and at night the two closed on black. Anything under one of the four
+  dark skies is now drawn up to half again as bright while the sky is in, which the effects of a
+  Wynncraft weapon and a self-lit piece of art both sit out, since neither is a thing the sky
+  darkened.
+- **Text stays readable under those skies.** A sign or a name plate is lit by the light where it
+  stands, which the sky has just darkened, so its letters were left describing a world that is no
+  longer on screen. The light is now raised under a dark sky, further for dark letters than for pale
+  ones, and a text display's own glow is carried up with it. Rain stops it, because a storm is dark
+  enough on its own.
+- **A beacon another mod has hidden no longer casts a shadow.** Wynntils takes its activity beacons
+  out of the picture by a flag rather than out of the world, and the shadow map is filled on a walk
+  of its own that never saw that flag.
+
+### Fixed
+
+- **The transition screens are drawn over the misted picture.** A transition used to be painted
+  over the frame as it stood before the Mist Woods fog went on, so a screen arriving while the woods
+  were misted showed a seam. The three effects drawn over a finished frame now see each other, in
+  the order WynnIris draws them: mist, then the scene under a sky, then the screen.
+- **A Wynncraft sky moves between ticks.** Its dome was animated from a clock counted in whole
+  ticks, so a sky stepped twenty times a second where WynnIris's slides, and the dome and the scene
+  drawn under it were counting differently. Both now read the same clock, with the frame's fraction
+  of a tick on it.
+- **A mesh that asks for the entity light tweaks to stand is obeyed.** Wynncraft marks such a mesh
+  in the high bits of an identifier, and the self-lit lift was being applied over art the server had
+  already lit.
+
 ## 0.12.0-beta
 
 ### Added
