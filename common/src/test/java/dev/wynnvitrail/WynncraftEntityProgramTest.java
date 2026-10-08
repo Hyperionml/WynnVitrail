@@ -16,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import dev.vitrail.glsl.PackProgram;
 import dev.vitrail.glsl.VertexInputs;
 import dev.vitrail.pack.model.ProgramStage;
-
 /**
  * Drives the translator off-game over an entity program written on the spot, and checks the text
  * the Wynncraft patch is supposed to leave in it.
@@ -908,6 +907,55 @@ class WynncraftEntityProgramTest {
 		}
 	}
 
+	/**
+	 * The text family, which is a different contract over one of the same files and is given a
+	 * different thing.
+	 * <p>
+	 * <strong>The rows the game draws glyphs with share a program with the translucent entities</strong>
+	 * ({@code gbuffers_entities_translucent}, which is Iris's own mapping), and a program is
+	 * translated once per contract, so the text half is a module of its own and this is that module.
+	 * What it is given is the sky's compensation cubed and nothing else, for the reason WynnIris cubes
+	 * it ({@code VanillaCoreTransformer.java:347-348}): half again is enough for a body and not enough
+	 * for a letter, and a sign at midnight is the case the whole effect is for.
+	 * <p>
+	 * The absences are asserted as carefully as the presence, and they are the point of the test: an
+	 * entity application woven into a text program would be looking for a vertex colour, a limb and a
+	 * sprite that no glyph has, and what it would do with them is not a picture anybody could predict.
+	 */
+	@Test
+	void aTextProgramIsGivenTheSkysCompensationCubedAndNothingElse(@TempDir Path pack)
+			throws IOException {
+		withSwitch(SWITCH, true, () -> {
+			Map<ProgramStage, String> text = translate(pack, VertexInputs.GLYPH,
+					"gbuffers_entities_translucent");
+
+			String fragment = text.get(ProgramStage.FRAGMENT);
+			assertNotNull(fragment);
+
+			assertTrue(fragment.contains("float wynnEntityBoost;"),
+					"the compensation is spent and never declared:\n" + fragment);
+			assertTrue(fragment.contains("ofFragData0.rgb *= wynnEntityBoost * wynnEntityBoost"
+							+ " * wynnEntityBoost;"),
+					"the letters are not lifted by the cube WynnIris lifts them by:\n" + fragment);
+			assertTrue(fragment.contains("ofPackMain();"),
+					"the pack's main was not wrapped, so the line has nowhere to stand:\n" + fragment);
+
+			// And none of the entity application, which is what tells the two contracts apart.
+			assertFalse(fragment.contains("wynnApplyGlint"),
+					"a glint was woven into a program that has no sprite to draw one over:\n"
+							+ fragment);
+			assertFalse(fragment.contains("wynnTranslucency"),
+					"a translucency level was decoded from a colour a glyph has not got:\n"
+							+ fragment);
+			assertFalse(fragment.contains("wynnIsShadeless"),
+					"the shading corrections were woven into a text program:\n" + fragment);
+			assertFalse(fragment.contains("of_VertexColor"),
+					"a varying was carried for a family that has no colour to carry:\n" + fragment);
+			assertFalse(fragment.contains("wynnApplyPlayer"),
+					"the emote decode was woven into a program that has no limbs:\n" + fragment);
+		});
+	}
+
 	/** What both stages of the program came out as, by stage, over the entity fragment above. */
 	private static Map<ProgramStage, String> translate(Path pack) throws IOException {
 		return translate(pack, FRAGMENT);
@@ -915,11 +963,22 @@ class WynncraftEntityProgramTest {
 
 	/** The same, over a fragment of the caller's choosing. */
 	private static Map<ProgramStage, String> translate(Path pack, String fragment) throws IOException {
-		Path shaders = Files.createDirectories(pack.resolve("shaders"));
-		Files.writeString(shaders.resolve("gbuffers_entity.vsh"), VERTEX, StandardCharsets.UTF_8);
-		Files.writeString(shaders.resolve("gbuffers_entity.fsh"), fragment, StandardCharsets.UTF_8);
+		return translate(pack, VertexInputs.ENTITY, "gbuffers_entity", fragment);
+	}
 
-		var loaded = PackProgram.load(pack, "gbuffers_entity", VertexInputs.ENTITY, Map.of(), "");
+	/** The same, over a program of the caller's choosing, under the contract it is drawn by. */
+	private static Map<ProgramStage, String> translate(Path pack, VertexInputs inputs, String path)
+			throws IOException {
+		return translate(pack, inputs, path, FRAGMENT);
+	}
+
+	private static Map<ProgramStage, String> translate(Path pack, VertexInputs inputs, String path,
+			String fragment) throws IOException {
+		Path shaders = Files.createDirectories(pack.resolve("shaders"));
+		Files.writeString(shaders.resolve(path + ".vsh"), VERTEX, StandardCharsets.UTF_8);
+		Files.writeString(shaders.resolve(path + ".fsh"), fragment, StandardCharsets.UTF_8);
+
+		var loaded = PackProgram.load(pack, path, inputs, Map.of(), "");
 		assertTrue(loaded.isPresent(), "the program did not load");
 
 		Map<ProgramStage, String> text = new java.util.EnumMap<>(ProgramStage.class);

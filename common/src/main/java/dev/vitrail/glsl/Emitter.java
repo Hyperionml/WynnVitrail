@@ -48,7 +48,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 		boolean distantPrologue, boolean entityWrapped, boolean linesWrapped,
 		boolean alphaEpilogue, boolean covers,
 		boolean wrapsFragment, boolean ordered, boolean namesFragDepth, boolean makesOverlayColour,
-		boolean wynncraftAnchored, boolean coreProfile) {
+		boolean wynncraftAnchored, boolean wynncraftTextBoost, boolean coreProfile) {
 
 	private static final String VERSION = "#version 460 core";
 
@@ -765,6 +765,23 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 	private String wynncraftEpilogue(Set<String> shadowed) {
 		if (this.maxFragmentOutput < 0) {
 			return "";
+		}
+
+		// The text family's one line, and it is the whole of what that family is given: the sky's
+		// compensation cubed, which is a sign's readability at night rather than a body's under a
+		// storm. It comes before the gate below, because it writes colour alone and a text program's
+		// slot nought is a colour whatever it was declared as.
+		//
+		// The cube is WynnIris's own ({@code VanillaCoreTransformer.java:347-348}) and it is not a
+		// taste: the compensation is half again at full strength, which is enough for a body and not
+		// enough for a letter two pixels wide, and the cube is what carries it to something a player
+		// can read. Nothing here can be told about a sky that has not arrived, and nothing needs to
+		// be: the member stands at one and the cube of one is one.
+		if (this.wynncraftTextBoost) {
+			String boost = WynncraftPatch.ENTITY_BOOST;
+			String text = outputName(0, shadowed);
+
+			return text + ".rgb *= " + boost + " * " + boost + " * " + boost + "; ";
 		}
 
 		// The deferred half wrote the statements into the pack's own main instead, at an anchor

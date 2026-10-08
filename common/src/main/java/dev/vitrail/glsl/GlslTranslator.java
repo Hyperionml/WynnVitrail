@@ -817,6 +817,26 @@ public final class GlslTranslator {
 	private boolean wynncraftEpilogue;
 
 	/**
+	 * Whether this fragment body was wrapped for the text family's one line, which is not the
+	 * Wynncraft application at all.
+	 * <p>
+	 * <strong>A text program is a separate contract over the same file and is given a separate
+	 * thing.</strong> The rows the game draws its glyphs with share a program with the translucent
+	 * entities - {@code gbuffers_entities_translucent}, which is Iris's own mapping - and a program
+	 * is translated once per contract, so the text half is its own module. What it can be given is
+	 * not what an entity is given: there is no vertex colour for the effects to decode, no fade, no
+	 * item and no glint, and the emote's limb data means nothing for a glyph. What is left is the
+	 * sky's compensation, and WynnIris gives it to the text family cubed
+	 * ({@code VanillaCoreTransformer.java:347-348}), which is the readability of a sign at night
+	 * rather than a body under a storm.
+	 * <p>
+	 * One flag rather than the epilogue's, because the two are exclusive and the difference is the
+	 * whole of what the wrapper was written for: {@link Emitter} reads this one first and writes the
+	 * one multiply.
+	 */
+	private boolean wynncraftTextBoost;
+
+	/**
 	 * Whether the fragment stage names {@code gl_FragDepth} anywhere at all, live branch or not.
 	 * <p>
 	 * Anywhere at all, because what it decides is which value the mask is filled from, and a stage
@@ -4369,6 +4389,14 @@ public final class GlslTranslator {
 	 * never declared.
 	 */
 	private void planWynncraft() {
+		// The text family first and out of the way, because none of what follows is about it: the
+		// variant, the emote, the glint and the item tint all read the entity mesh, and the rows the
+		// game draws glyphs with are a different contract over the same file.
+		if (this.inputs == VertexInputs.GLYPH) {
+			planTextBoost();
+			return;
+		}
+
 		if (!WynncraftPatch.carriesColour(this.stage, this.inputs)) {
 			return;
 		}
@@ -4459,6 +4487,33 @@ public final class GlslTranslator {
 		}
 
 		this.wynncraftEpilogue = this.packMainName >= 0;
+	}
+
+	/**
+	 * Plans the one line the text family is given: the sky's compensation, cubed.
+	 * <p>
+	 * <strong>Only the fragment stage, and only where the effects are on.</strong> The vertex stage
+	 * of a text program has nothing to do with this - no value is carried, no name is redefined and
+	 * no decode runs - so asking it is asking about a file it would be given nothing for.
+	 * <p>
+	 * <strong>The block member is the same one an entity program takes</strong>, which is not
+	 * tidiness: the number it holds is the answer to the same question, and the two families are
+	 * drawn in one frame under one sky. What differs is how it is spent, and that is
+	 * {@link Emitter}'s.
+	 */
+	private void planTextBoost() {
+		if (this.stage != ProgramStage.FRAGMENT || !WynncraftSettings.effects()
+				|| this.maxFragmentOutput < 0) {
+			return;
+		}
+
+		takeEntityBoost();
+
+		if (this.packMainName < 0) {
+			this.packMainName = mainName();
+		}
+
+		this.wynncraftTextBoost = this.packMainName >= 0;
 	}
 
 	/**
@@ -4697,7 +4752,7 @@ public final class GlslTranslator {
 	 * the Wynncraft effects.
 	 */
 	private boolean wrapsFragment() {
-		return this.alphaEpilogue || this.covers || this.wynncraftEpilogue;
+		return this.alphaEpilogue || this.covers || this.wynncraftEpilogue || this.wynncraftTextBoost;
 	}
 
 	/**
@@ -6309,7 +6364,7 @@ public final class GlslTranslator {
 			this.packBuiltinCalls, this.mainWrapped, this.depthEpilogue, this.terrainPrologue,
 			this.distantPrologue, this.entityWrapped, this.linesWrapped, this.alphaEpilogue, this.covers,
 			wrapsFragment(), this.ordered, this.namesFragDepth, this.makesOverlayColour,
-			this.wynncraftAnchor >= 0, this.coreProfile);
+			this.wynncraftAnchor >= 0, this.wynncraftTextBoost, this.coreProfile);
 	}
 
 	/**
