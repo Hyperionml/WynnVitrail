@@ -71,6 +71,13 @@ final class WynncraftSkybox {
 	 * pack's own test does: the marking is bytes of a texture read back through a sampler, so a
 	 * pack that filters rather than snapping to a texel lands between two values rather than on
 	 * one, and a blue outside one to seven is a texel that merely happens to look like a marking.
+	 * <p>
+	 * The lookup is forced to LOD 0 because the signal has to survive as the exact bytes the server
+	 * stored. A sampler that lets the GPU choose a level - whether through mipmapping, anisotropy
+	 * or a derivative-based LOD - can average neighbouring texels and move the green and alpha off
+	 * their marking values, and that is enough for the strict equality WynnIris uses to miss a
+	 * fragment. The tolerance absorbs a one-step move; the LOD lock stops the move from happening
+	 * in the first place.
 	 */
 	static final String SIGNAL_NAME = "wynnSkyboxSignal";
 
@@ -86,10 +93,10 @@ final class WynncraftSkybox {
 	private static final String SIGNAL =
 			"""
 			int wynnSkyboxSignal(sampler2D tex, vec2 uv) {
-			    vec4 sc = texture(tex, uv);
+			    vec4 sc = textureLod(tex, uv, 0.0);
 			    int sg = int(round(sc.g * 255.0));
 			    int sa = int(round(sc.a * 255.0));
-			    if (sg == 251 && sa == 254) {
+			    if (abs(sg - 251) <= 1 && abs(sa - 254) <= 1) {
 			        int sid = int(round(sc.b * 255.0));
 			        if (sid >= 1 && sid <= 7) return sid;
 			    }

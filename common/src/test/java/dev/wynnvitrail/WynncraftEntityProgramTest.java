@@ -332,6 +332,13 @@ class WynncraftEntityProgramTest {
 			assertTrue(fragment.contains("vec4 wynnSkyApply(int id, float time, vec3 direction) {"),
 					"no sky is drawn:\n" + fragment);
 
+			// The decode is read at LOD 0 with a tolerance, because Vitrail's sampler can still let
+			// anisotropy or derivative-based LOD move the marking bytes off their exact values.
+			assertTrue(fragment.contains("vec4 sc = textureLod(tex, uv, 0.0);"),
+					"the skybox signal is not forced to LOD 0:\n" + fragment);
+			assertTrue(fragment.contains("abs(sg - 251) <= 1 && abs(sa - 254) <= 1"),
+					"the skybox signal has no tolerance on the marking bytes:\n" + fragment);
+
 			// That the seven skies are all there, by one function of each shape they come in: the
 			// lattice, a rotation, the crystalline field, the bolt and its envelope.
 			for (String sky : new String[] {"float wynnSkyFbm(vec2 p) {", "float wynnSkyFbm(vec3 p) {",
