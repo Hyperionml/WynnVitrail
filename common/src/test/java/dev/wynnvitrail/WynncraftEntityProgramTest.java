@@ -33,11 +33,18 @@ import dev.vitrail.pack.model.ProgramStage;
  * That is the shape the real Wynncraft pack has, and it is the shape a patch that only answered
  * names the pack already wrote would pass and this one would fail.
  * <p>
- * The switch is a system property, so the two states are checked in one JVM a call apart, which is
- * the only way to read one against the other. {@code GlslTranslator.emissionSwitches} keeps the
+ * The switch ships on and is turned off by a file in the game directory, so the two states are
+ * read in one JVM through the property that outranks the file - which is the only way to read one
+ * against the other without a second launch. {@code GlslTranslator.emissionSwitches} keeps the
  * translation caches from serving one state's text to the other.
  */
 class WynncraftEntityProgramTest {
+
+	/**
+	 * The property that outranks the marker file, named once so that a test that moves it and the
+	 * tests that read the moved value cannot come to disagree about its spelling.
+	 */
+	private static final String SWITCH = "wynnvitrail.enabled";
 
 	private static final String VERTEX = """
 			#version 120
@@ -69,7 +76,7 @@ class WynncraftEntityProgramTest {
 
 	@Test
 	void theDecodeAndItsApplicationAreWovenIntoAnEntityProgram(@TempDir Path pack) throws IOException {
-		withSwitch("wynnvitrail.enabled", true, () -> {
+		withSwitch(SWITCH, true, () -> {
 			Map<ProgramStage, String> text = translate(pack);
 
 			String vertex = text.get(ProgramStage.VERTEX);
@@ -165,7 +172,7 @@ class WynncraftEntityProgramTest {
 	 */
 	@Test
 	void theGlintIsDrawnOverAnItemThatCarriesASignal(@TempDir Path pack) throws IOException {
-		withSwitch("wynnvitrail.enabled", true, () -> {
+		withSwitch(SWITCH, true, () -> {
 			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
 
 			assertNotNull(fragment);
@@ -227,7 +234,7 @@ class WynncraftEntityProgramTest {
 	@Test
 	void theUnlitAndSelfLitMarkersAreCorrectedWhereTheyLieInTheOrder(@TempDir Path pack)
 			throws IOException {
-		withSwitch("wynnvitrail.enabled", true, () -> {
+		withSwitch(SWITCH, true, () -> {
 			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
 
 			assertNotNull(fragment);
@@ -318,7 +325,7 @@ class WynncraftEntityProgramTest {
 				}
 				""";
 
-		withSwitch("wynnvitrail.enabled", true, () -> {
+		withSwitch(SWITCH, true, () -> {
 			String text = translate(pack, fragment).get(ProgramStage.FRAGMENT);
 
 			assertTrue(text.contains("wynnTranslucency(of_VertexColor)"),
@@ -360,7 +367,7 @@ class WynncraftEntityProgramTest {
 				}
 				""";
 
-		withSwitch("wynnvitrail.enabled", true, () -> {
+		withSwitch(SWITCH, true, () -> {
 			Map<ProgramStage, String> text = translate(pack, fragment);
 
 			assertTrue(text.get(ProgramStage.FRAGMENT).contains("in vec4 of_VertexColor;"),
@@ -384,7 +391,7 @@ class WynncraftEntityProgramTest {
 
 	@Test
 	void aPackTranslatedWithThePatchOffIsUntouched(@TempDir Path pack) throws IOException {
-		withSwitch("wynnvitrail.enabled", false, () -> {
+		withSwitch(SWITCH, false, () -> {
 			Map<ProgramStage, String> text = translate(pack, FRAGMENT);
 
 			// The whole of the patch, by the one substring every line of it carries. A pack that
@@ -397,6 +404,83 @@ class WynncraftEntityProgramTest {
 					"the vertex stage was patched with the switch off:\n"
 							+ text.get(ProgramStage.VERTEX));
 		});
+	}
+
+	/**
+	 * The shipped state, which is the one a player who has said nothing is in.
+	 * <p>
+	 * <strong>This is the case that failed in the game and is the reason the switch has a file.</strong>
+	 * Before it, the only way to be in this state was to name a JVM property, and the way to be in
+	 * the other was to name it too, so a run with nothing named had no patch and no line anywhere
+	 * saying so. The assertion is the one that would have caught it: a pack that carries a signal
+	 * gets the glint with nothing set at all.
+	 */
+	@Test
+	void thePatchRunsWithNothingSetAnywhere(@TempDir Path pack) throws IOException {
+		String previous = System.getProperty(SWITCH);
+		System.clearProperty(SWITCH);
+		try {
+			// A directory with no marker in it, which is what an installation nobody has touched
+			// holds; read here so the test does not lean on whatever the last one left behind.
+			WynncraftSettings.read(pack);
+
+			assertTrue(WynncraftSettings.effects(), "the patch is off with nothing set anywhere");
+			assertTrue(WynncraftSettings.state().contains("is ON"),
+					"the state line does not say the patch is running: " + WynncraftSettings.state());
+
+			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
+			assertTrue(fragment.contains("= wynnApplyGlint("),
+					"a pack that says nothing at all was not given the glint:\n" + fragment);
+		} finally {
+			if (previous != null) {
+				System.setProperty(SWITCH, previous);
+			}
+		}
+	}
+
+	/**
+	 * The file a player uses, and the property that outranks it.
+	 * <p>
+	 * Both halves in one test because the second is a statement about the first: the property is not
+	 * a second switch, it is the override that lets one JVM hold the states a call apart, which is
+	 * what the tests above are written on.
+	 */
+	@Test
+	void theFileInTheGameDirectoryTurnsThePatchOffAndThePropertyOutranksIt(@TempDir Path game)
+			throws IOException {
+		Path marker = game.resolve("wynnvitrail").resolve("no-wynncraft");
+		Files.createDirectories(marker.getParent());
+		Files.writeString(marker, "", StandardCharsets.UTF_8);
+
+		String previous = System.getProperty(SWITCH);
+		System.clearProperty(SWITCH);
+		try {
+			WynncraftSettings.read(game);
+
+			assertFalse(WynncraftSettings.effects(), "the marker did not turn the patch off");
+			assertTrue(WynncraftSettings.state().contains("is OFF"),
+					"the state line does not say the patch is off: " + WynncraftSettings.state());
+			assertTrue(WynncraftSettings.state().contains("no-wynncraft"),
+					"the state line does not name the file that did it: " + WynncraftSettings.state());
+
+			// The property over the file, which is the test's own escape hatch and the only reason
+			// the two states can be read against each other in one JVM.
+			System.setProperty(SWITCH, "true");
+
+			assertTrue(WynncraftSettings.effects(), "the property did not outrank the file");
+			assertTrue(WynncraftSettings.state().contains("is ON"),
+					"the state line does not credit the property: " + WynncraftSettings.state());
+		} finally {
+			if (previous == null) {
+				System.clearProperty(SWITCH);
+			} else {
+				System.setProperty(SWITCH, previous);
+			}
+
+			// Put the process back in the state every other test expects, whatever happened: the
+			// switch is held in a static and the tests share a JVM.
+			WynncraftSettings.read(game.getParent());
+		}
 	}
 
 	/** What both stages of the program came out as, by stage, over the entity fragment above. */

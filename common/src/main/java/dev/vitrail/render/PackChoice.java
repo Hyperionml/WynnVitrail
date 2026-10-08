@@ -23,6 +23,7 @@ import dev.vitrail.settings.PackSession;
 import dev.vitrail.settings.SettingsFile;
 import dev.vitrail.settings.SettingsLayers;
 import dev.vitrail.Vitrail;
+import dev.wynnvitrail.WynncraftSettings;
 import com.mojang.blaze3d.GpuDeviceLossException;
 import net.minecraft.client.GraphicsPreset;
 import net.minecraft.client.Minecraft;
@@ -125,6 +126,10 @@ public final class PackChoice {
 		// Beside it, for the compiles rather than the translations: it decides the bytes every
 		// module of this load is made of, and the key it is stored under.
 		RawLocals.read(gameDirectory);
+		// And beside that one, for the translations: it decides whether a Wynncraft entity program
+		// gains the decode, the varying and the wrapper, and it is in the same cache key. Read here
+		// rather than where it is used because the answer has to hold still for the whole load.
+		WynncraftSettings.read(gameDirectory);
 		// Beside the trig switch and for the same reason: what follows is what these tallies
 		// are a tally of. The cache empties its own on the same line, so that its counts and the
 		// clock's milliseconds are read off one load.
