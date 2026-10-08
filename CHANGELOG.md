@@ -11,6 +11,23 @@ publishing a jar named after one thing and built from another.
 Everything is a pre-release while the version stays under `1.0.0`. Nothing here is a promise about
 what the next one holds.
 
+## 0.12.0-beta-wynn3
+
+### Fixed
+
+- **The game no longer stops drawing the pack the first time a Wynncraft sky arrives.** The pass that
+  tints and fogs the scene under a sky asks the graphics device for a block of uniform memory, and
+  the block was allocated four bytes short of the second of the two matrices it holds. Nothing
+  compiled wrong and nothing validated wrong: the write ran off the end of the buffer and Vitrail
+  stopped drawing the pack, which is the message a player saw as `newPosition > limit: (128 > 80)`.
+  The three blocks drawn over a finished frame are now the size of the members their own shaders
+  declare, and a test reads each shader's declaration and holds the two together, so the next member
+  added to one side of a block and not the other fails a build rather than a session.
+
+- **The sky a player is under is now named in the log.** It was already being read and settled - the
+  line for it is in the release below - and it is what told this bug from the several it could have
+  been.
+
 ## 0.12.0-beta-wynn2
 
 The Wynncraft half of the fork, one revision on from the first jar. Everything below is aimed at a
