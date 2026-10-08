@@ -37,11 +37,15 @@ import dev.vitrail.glsl.GlslTranslator;
  * {@code max} it resolves to at one, so that the day this becomes a setting the change is the
  * declaration and not the formula.
  * <p>
- * <strong>Two things WynnIris pairs with these are deliberately absent.</strong> Its brightness
- * boost compensates for a dark skybox and is worth one whenever no dark skybox is on screen, so
- * there is nothing to port until the skyboxes are written; its item tint is gated on the id of the
- * item being drawn, which this engine does not publish on an entity mesh at all
- * ({@code render/EngineOptions.java:161}).
+ * <strong>The brightness boost WynnIris pairs with these is deliberately absent, and the item tint
+ * it pairs with them is not.</strong> The boost compensates for a scene a dark skybox has tinted,
+ * and is worth one exactly while such a skybox is fading in, so it is a multiply by one until the
+ * CPU half that decides which sky is on screen is written - and a step that is always a multiply by
+ * one is a step that would be read as working. The item tint is the other half of that pair and is
+ * drawn: it lives in {@code WynncraftPatch.epilogue} beside these two, reads the item's own
+ * identifier, and is gated on the draw being an item the game told the id of, which this engine
+ * publishes on the entity mesh like every other identifier of the three
+ * ({@code GlslTranslator.ENTITY_IDS}).
  */
 final class WynncraftShading {
 
