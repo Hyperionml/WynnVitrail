@@ -6,7 +6,7 @@ issueTrackerURL = "https://github.com/avpbynf/Vitrail-Shaders/issues"
 [[mods]]
 modId = "${mod_id}"
 version = "${mod_version}"
-displayName = "Vitrail"
+displayName = "WynnVitrail"
 displayURL = "https://github.com/avpbynf/Vitrail-Shaders"
 logoFile = "vitrail.png"
 # The same square image under the key current NeoForge reads, which it asks for beside logoFile: a
@@ -14,7 +14,7 @@ logoFile = "vitrail.png"
 iconFile = "vitrail.png"
 authors = "avpbynf"
 displayTest = "IGNORE_ALL_VERSION"
-description = '''OptiFine-format shader packs, on Minecraft's native Vulkan renderer'''
+description = '''Vitrail - OptiFine-format shader packs on Minecraft's native Vulkan renderer - with native Wynncraft support'''
 
 # Sodium reads this block out of every mod's own metadata and turns the named mixin off.
 # features.render.world.sky hides the whole sky pass whenever the camera is in a fluid, which with a

@@ -3,7 +3,7 @@ plugins {
 }
 
 base {
-	archivesName = "vitrail-common"
+	archivesName = "${project.mod_id}-common"
 }
 
 neoForge {
@@ -73,7 +73,7 @@ tasks.named("test", Test).configure {
 // the jar's root for their mod list, which is where each of them looks.
 tasks.named("processResources", ProcessResources).configure {
 	from("src/main/resources/vitrail.png") {
-		into "assets/vitrail/textures/gui"
+		into "assets/${project.mod_id}/textures/gui"
 		rename { "config-icon.png" }
 	}
 }
@@ -96,7 +96,7 @@ def writeBuildIdentity = tasks.register("writeBuildIdentity") {
 
 	doLast {
 		def directory = buildIdentityDir.get().asFile
-		def stamp = new File(directory, "vitrail-build-identity")
+		def stamp = new File(directory, "wynnvitrail-build-identity")
 
 		directory.mkdirs()
 

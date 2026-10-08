@@ -5,7 +5,7 @@ plugins {
 evaluationDependsOn(":common")
 
 base {
-	archivesName = "vitrail-neoforge"
+	archivesName = "${project.mod_id}-neoforge"
 }
 
 neoForge {

@@ -2,10 +2,11 @@
 	"schemaVersion": 1,
 	"id": "${mod_id}",
 	"version": "${mod_version}",
-	"name": "Vitrail",
-	"description": "OptiFine-format shader packs, on Minecraft's native Vulkan renderer",
+	"name": "WynnVitrail",
+	"description": "Vitrail - OptiFine-format shader packs on Minecraft's native Vulkan renderer - with native Wynncraft support",
 	"authors": [
-		"avpbynf"
+		"avpbynf",
+		"WynnVitrail fork"
 	],
 	"contact": {
 		"homepage": "https://github.com/avpbynf/Vitrail-Shaders",
@@ -27,6 +28,9 @@
 		"vitrail.mixins.json",
 		"vitrail-game.mixins.json",
 		"vitrail-fabric.mixins.json"
+	],
+	"provides": [
+		"vitrail"
 	],
 	"depends": {
 		"fabricloader": ">=${fabric_loader_min_version}",

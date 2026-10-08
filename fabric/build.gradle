@@ -3,7 +3,7 @@ plugins {
 }
 
 base {
-	archivesName = "vitrail-fabric"
+	archivesName = "${project.mod_id}-fabric"
 }
 
 neoForge {

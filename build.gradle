@@ -412,7 +412,7 @@ tasks.register("mergedJar", Jar) {
 	group = "build"
 	description = "Assembles the one jar that runs under either loader."
 
-	archiveBaseName = "vitrail"
+	archiveBaseName = project.mod_id
 	archiveVersion = "${project.effectiveVersion}+mc${project.minecraft_version}"
 
 	// Aimed at build/libs itself, because the base plugin's home for a root archive is

@@ -16,13 +16,18 @@ import java.nio.charset.StandardCharsets;
  */
 public final class Vitrail {
 
-	public static final String MOD_ID = "vitrail";
-	public static final String MOD_NAME = "Vitrail";
+	/**
+	 * The id the loaders know this mod by, and the namespace of every resource and render pipeline
+	 * this engine looks up. WynnVitrail carries its own rather than upstream's, so that a jar of
+	 * this fork and a jar of Vitrail are two mods and not one mod twice.
+	 */
+	public static final String MOD_ID = "wynnvitrail";
+	public static final String MOD_NAME = "WynnVitrail";
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(MOD_NAME);
 
 	/** Where the build writes the commit, and absent in a jar built from a release version. */
-	private static final String BUILD_STAMP = "/vitrail-build-identity";
+	private static final String BUILD_STAMP = "/wynnvitrail-build-identity";
 
 	/** Read once, because it is a fact about the jar and cannot change under a running game. */
 	private static final String BUILD_IDENTITY = readBuildIdentity();
