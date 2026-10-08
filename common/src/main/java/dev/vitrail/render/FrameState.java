@@ -7,6 +7,7 @@ import dev.vitrail.pack.target.PackDirectives;
 import dev.vitrail.render.timing.PassTimings;
 import dev.vitrail.uniform.ClipSpace;
 import dev.wynnvitrail.WynncraftMist;
+import dev.wynnvitrail.WynncraftSky;
 import dev.vitrail.uniform.values.FrameSmoothed;
 import dev.vitrail.uniform.WorldState;
 
@@ -387,6 +388,12 @@ public final class FrameState implements WorldState {
 		// things are in hand ({@code MixinFogRenderer.java:181-203}).
 		WynncraftMist.note(level, camera, this.partialTick);
 
+		// Which of Wynncraft's skies the player is under, settled for the frame about to be drawn.
+		// The markings it settles were read during the LAST frame's level draw, which is this
+		// engine's shape rather than a lag: the frame's snapshot is taken before anything is drawn,
+		// so what it can see is the frame before. WynncraftSky carries the whole of that argument.
+		WynncraftSky.advance(this.frameTime);
+
 		// Cleared last, so that a frame in which nothing captured falls back rather than
 		// publishing the frame before it. The bob goes with it and for the same reason: a frame
 		// that took none must not be handed the last one's, or the world would keep swinging after
@@ -411,6 +418,11 @@ public final class FrameState implements WorldState {
 		this.lightningTick = Long.MIN_VALUE;
 		this.lightningBoltPosition.zero();
 		this.biomeHolder = null;
+		// And the sky, which is the one value here that is not a reading of this frame: it is a
+		// state machine whose identity, fade and grace are all carried from the frame before, and a
+		// world change is the one moment none of the three can mean anything. Left standing, the
+		// sky of the region just left would tint the first seconds of the next one.
+		WynncraftSky.reset();
 	}
 
 	/**
