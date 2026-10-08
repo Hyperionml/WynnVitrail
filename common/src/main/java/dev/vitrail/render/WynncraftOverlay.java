@@ -84,9 +84,9 @@ final class WynncraftOverlay {
 	private static final String SCENE_DEPTH = "DepthScene";
 	private static final String OPAQUE_DEPTH = "DepthOpaque";
 
-	private static final String FOG_BLOCK = "OfWynnFog";
-	private static final String SCENE_BLOCK = "OfWynnScene";
-	private static final String TRANSITION_BLOCK = "OfWynnTrans";
+	static final String FOG_BLOCK = "OfWynnFog";
+	static final String SCENE_BLOCK = "OfWynnScene";
+	static final String TRANSITION_BLOCK = "OfWynnTrans";
 
 	/** Two triangles over the whole screen, the quad every full screen pass of this engine draws. */
 	private static final int VERTICES = 6;
@@ -116,7 +116,7 @@ final class WynncraftOverlay {
 	 * glass has to be fogged by the terrain behind it rather than by the pane, which is the
 	 * reason WynnIris gives for reading two depths ({@code WynncraftBiomeFogRenderer.java:108-118}).
 	 */
-	private static final String FOG = """
+	static final String FOG = """
 			#version 460 core
 
 			uniform sampler2D InSampler;
@@ -219,7 +219,7 @@ final class WynncraftOverlay {
 	 * is the scene's own depth in the pack's window, where the sky is exactly one, and a fragment at
 	 * it is handed back untouched.
 	 */
-	private static final String SCENE = "#version 460 core\n"
+	static final String SCENE = "#version 460 core\n"
 			+ """
 			uniform sampler2D InSampler;
 			uniform sampler2D DepthScene;
@@ -305,7 +305,7 @@ final class WynncraftOverlay {
 	 * picture shows through, and a kind standing at nought - the entity has not arrived yet, or
 	 * the frame is between two screens - discards, which leaves the picture exactly as it was.
 	 */
-	private static final String TRANSITION = """
+	static final String TRANSITION = """
 			#version 460 core
 
 			uniform sampler2D InSampler;
@@ -387,14 +387,27 @@ final class WynncraftOverlay {
 		return VERTEX_ID.equals(id) ? VERTEX : null;
 	});
 
-	/** The fog block: one matrix, two colours' worth of parameters, and the screen. */
-	private static final int FOG_BLOCK_BYTES = 96;
+	/**
+	 * The three blocks' sizes, which the writer and the shader's own declaration have to agree on.
+	 * <p>
+	 * <strong>Written as the arithmetic rather than as the answer, and read back by a test.</strong>
+	 * A buffer one member short is not a compile error and not a validation error: the writer runs
+	 * off the end of it and the game dies with a buffer position in the message, which names neither
+	 * the block nor the member that was added without the size. So each line below says what it is
+	 * made of, and {@code WynncraftOverlayBlocksTest} sums the shader's own declaration and compares
+	 * the two - which is a check that fails when a member is added to one side and not the other,
+	 * and is the only check that can.
+	 * <p>
+	 * These are {@code Std140Builder}'s numbers and not a language's: a mat4 is four columns of
+	 * sixteen bytes and a vec4 is sixteen.
+	 */
+	static final int FOG_BLOCK_BYTES = 64 + 16 + 16;
 
-	/** The scene block: the two matrices the direction is rebuilt from and one row of parameters. */
-	private static final int SCENE_BLOCK_BYTES = 80;
+	/** @see #FOG_BLOCK_BYTES */
+	static final int SCENE_BLOCK_BYTES = 64 + 64 + 16;
 
-	/** The transition block: three vec4s. */
-	private static final int TRANSITION_BLOCK_BYTES = 48;
+	/** @see #FOG_BLOCK_BYTES */
+	static final int TRANSITION_BLOCK_BYTES = 16 + 16 + 16;
 
 	/** How far the fog's opacity moves towards its answer in one frame, WynnIris's own rate. */
 	private static final float FOG_RAMP = 0.05F;
