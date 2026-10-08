@@ -385,6 +385,30 @@ public final class WynncraftPatch {
 	}
 
 	/**
+	 * The skies, and the lattice they are built on, as a library a program of this engine's own can
+	 * be compiled against.
+	 * <p>
+	 * <strong>A second reader of the same text rather than a second copy of it.</strong> The scene
+	 * pass draws its fog towards the colour of the sky the player is under, and the only way for that
+	 * fog and the dome behind it to be the same drawing is for both to be the same functions. So the
+	 * pass is compiled against these, which are the very declarations {@link #helpers} hands a pack -
+	 * minus the marking's decode, which takes a sampler a pass of this engine's has no reason to
+	 * carry, the identity having been settled on the CPU and arriving as a number.
+	 * <p>
+	 * <strong>This is the seam, so it is public and it is here.</strong> The library lives in
+	 * {@link WynncraftGlint} and {@link WynncraftSkybox}, which are this package's own business and
+	 * are not visible outside it; the pass lives in {@code dev.vitrail.render} and is the engine's.
+	 * One accessor on the one class the engine already talks to is the smallest door that can be
+	 * opened between them, and the alternative - a copy of two hundred lines of GLSL in the engine -
+	 * is the one thing this port exists not to do.
+	 *
+	 * @return the declarations, newline separated, in the order one may call another
+	 */
+	public static String skyLibrary() {
+		return WynncraftGlint.skyLattice() + WynncraftSkybox.library();
+	}
+
+	/**
 	 * The application, for the wrapper, after the pack's own body has run and left its colour in
 	 * {@code output}.
 	 * <p>

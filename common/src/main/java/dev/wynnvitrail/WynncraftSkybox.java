@@ -435,17 +435,57 @@ final class WynncraftSkybox {
 			""";
 
 	/**
-	 * Every helper above, in the order one may call another.
+	 * The skies as a library on their own, for a program of this engine's rather than a pack's.
 	 * <p>
-	 * One list rather than a call per name at the one site that writes them, for the reason
-	 * {@link WynncraftSignals#HELPERS} gives: a helper added below is added here or not at all, and
-	 * a callee the header never wrote is a stage that does not compile. The order is not free -
-	 * {@code APPLY} dispatches to all seven of the others and {@code SKY_FBM_3D} calls
-	 * {@code SKY_FBM_2D} - so the array is the dependency order and not a list of names.
+	 * <strong>The same text the patch hands a pack, and that is the point of it.</strong> The pass
+	 * that tints and fogs the scene under a sky has to mix towards the colour OF that sky, and a
+	 * second copy of the seven drawings would be two drawings the day one of them was touched: the
+	 * fog would head towards one sky while the dome behind it was painted with another, which is a
+	 * seam in the middle of the horizon and nothing anywhere to say why. So the pass is compiled
+	 * against these very functions.
+	 * <p>
+	 * Everything here is a function of a direction, an hour and the lattice its noise is built on,
+	 * and nothing here takes a sampler - the decode does, and the decode is the one entry left out,
+	 * because a pass of this engine's has no pack texture to read a marking from and does not need to:
+	 * which sky is overhead was settled on the CPU ({@link WynncraftSky}) and arrives as a number.
+	 *
+	 * @return the declarations, newline separated, in the order one may call another
 	 */
-	static final String[] HELPERS = {SIGNAL, SKY_FBM_2D, SKY_FBM_3D, SKY_ROTATE_AXIS,
-			SKY_CRYSTAL_NOISE, SKY_LIGHTNING_BOLT, SKY_LIGHTNING_FLASH, SKY_DISTANT_CLOUD_FLASH,
-			APPLY};
+	static String library() {
+		StringBuilder text = new StringBuilder();
+
+		for (String declaration : DRAWING) {
+			text.append(declaration).append('\n');
+		}
+
+		return text.toString();
+	}
+
+	/**
+	 * The skies themselves and the three helpers only they use, in dependency order.
+	 * <p>
+	 * What {@link #SIGNAL} is not part of, and why, is in {@link #library()}.
+	 */
+	private static final String[] DRAWING = {SKY_FBM_2D, SKY_FBM_3D, SKY_ROTATE_AXIS, SKY_CRYSTAL_NOISE,
+			SKY_LIGHTNING_BOLT, SKY_LIGHTNING_FLASH, SKY_DISTANT_CLOUD_FLASH, APPLY};
+
+	/**
+	 * The decode and the drawing together, in the order one may call another, for a program whose
+	 * pack declared the marking it reads.
+	 * <p>
+	 * Built from {@link #DRAWING} rather than written out beside it, because the two are read by two
+	 * different things: a program a pack wrote is handed this one, and a pass of this engine's own is
+	 * handed that one ({@link #library()}), and a second list written by hand would agree today and
+	 * be edited on a different day. The decode comes first because the drawing is built on nothing
+	 * below it.
+	 */
+	static final String[] HELPERS;
+
+	static {
+		HELPERS = new String[DRAWING.length + 1];
+		HELPERS[0] = SIGNAL;
+		System.arraycopy(DRAWING, 0, HELPERS, 1, DRAWING.length);
+	}
 
 	private WynncraftSkybox() {
 	}

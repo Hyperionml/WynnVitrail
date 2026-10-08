@@ -469,6 +469,27 @@ final class WynncraftGlint {
 		BRIGHTNESS, RGB, HSV_TO_RGB, RANDOM_FLOAT, RANDOM_VEC2, NOISE, SMOOTH_NOISE, ROTATE, SMOOTHEN,
 		BLEND, GRAYSCALE, TINT, ABERRATION, SHINY, TINT_EFFECT, CONTINUOUS_SWEEP_UV, APPLY};
 
+	/**
+	 * The three declarations of the lattice above that a sky is built on, and nothing else.
+	 * <p>
+	 * <strong>For the pass that draws the scene out of the same sky the dome is drawn from.</strong>
+	 * That pass is a program of this engine's own rather than a pack's, so it cannot be handed the
+	 * whole glint library - which takes a sampler, an effect number and six coordinates, none of
+	 * which it has - and it cannot carry a second copy of the skies either, because two copies of one
+	 * drawing are two drawings the day one of them is touched. So the part of the library the skies
+	 * are built on is named here and the skies themselves are named beside them, and the pass
+	 * concatenates the two.
+	 * <p>
+	 * The three are exactly what {@link WynncraftSkybox} calls: the smooth noise its fbm
+	 * interpolates, the white noise that one interpolates between, and the seed hash the two
+	 * lightning envelopes are built on. A declaration missing from here is a pass that does not
+	 * compile, and the failure names a function in a file no pack wrote - which is why the pairing is
+	 * stated rather than left to whoever edits this next.
+	 */
+	static String skyLattice() {
+		return RANDOM_FLOAT + "\n" + NOISE + "\n" + SMOOTH_NOISE + "\n";
+	}
+
 	private WynncraftGlint() {
 	}
 }
