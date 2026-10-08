@@ -3,6 +3,7 @@ package dev.vitrail.uniform.values;
 import dev.vitrail.uniform.UniformCatalog;
 import dev.vitrail.uniform.UniformShape;
 import dev.vitrail.uniform.WorldState;
+import dev.wynnvitrail.WynncraftPatch;
 
 import java.time.LocalDateTime;
 
@@ -33,6 +34,14 @@ public final class TimeValues {
 		builder.add("worldTime", UniformShape.INT, (world, out) -> out.set((int) world.worldTime()));
 		builder.add("worldDay", UniformShape.INT, (world, out) -> out.set((int) world.worldDay()));
 		builder.add("moonPhase", UniformShape.INT, (world, out) -> out.set(world.moonPhase()));
+
+		// The same day with the frame's fraction of a tick on it. Not an OptiFine name and not one
+		// a pack asks for: the Wynncraft patch weaves it into a program itself, because the effects
+		// animate on a day that moves between ticks and the whole-tick worldTime above is an int.
+		// WynncraftPatch.DAY_CLOCK carries the whole argument, and the transitions this engine draws
+		// over the finished picture already take the same fraction on the Java side.
+		builder.add(WynncraftPatch.DAY_CLOCK, UniformShape.FLOAT,
+				(world, out) -> out.set((float) world.worldTime() + world.partialTick()));
 
 		// The real world clock, which packs use for a seasonal tint or a date joke. Read once a
 		// frame like everything else here: read per source, two passes of one frame either side of

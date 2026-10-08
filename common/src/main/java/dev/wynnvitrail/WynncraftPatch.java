@@ -52,23 +52,29 @@ public final class WynncraftPatch {
 	 * <strong>WynnIris drives every effect from the day and not from real time</strong>, which is
 	 * the one thing about the effects that is easy to get wrong and impossible to see in a still
 	 * picture. Its {@code iris_globalInfo.GameTime} reads like a clock and is not one: it is the
-	 * fraction of the current Minecraft day, which vanilla publishes in its own {@code Globals}
-	 * block and which WynnIris fills with {@code (level.getGameTime() % 24000 + partial) / 24000}
+	 * fraction of the current Minecraft day, which WynnIris fills with
+	 * {@code (level.getGameTime() % 24000 + partial) / 24000}
 	 * ({@code IrisRenderingPipeline.java:1755-1767}). The effects' own scale of three hundred
 	 * ({@code EntityPatcher.java:899}) is therefore three hundred units per game day, and the
 	 * animation starts again at dawn.
 	 * <p>
-	 * This engine's day is the same number counted in ticks: {@code render/FrameState.java:595}
-	 * takes {@code clock % 24000} and {@code uniform/values/TimeValues.java:33} publishes it as
-	 * {@code worldTime}. So the scale is three hundred over twenty-four thousand, and the two
-	 * engines' effects advance together rather than merely both advancing.
+	 * <strong>This engine's day is the same number counted in ticks, and the fraction on it is why
+	 * this name exists at all.</strong> {@code worldTime} is the day the packs read: an {@code int}
+	 * of the whole ticks, published by {@code uniform/values/TimeValues}. A day is twenty ticks a
+	 * second and a sky is twelve thousand units of it, so a sky driven from the integer steps half a
+	 * unit twenty times a second where WynnIris's slides, and the glint's own three hundred steps
+	 * with it. The transitions this engine draws over the finished picture already take the
+	 * fraction ({@code render/WynncraftOverlay.java:393}), so a patch animating from the integer
+	 * would have its two halves counting differently.
 	 * <p>
-	 * <strong>Taken into the block rather than assumed</strong>, because a program gets a block
-	 * member only when its pack declares one and the corpus is not unanimous: four of the five
-	 * packs studied write {@code uniform int worldTime} and Solas never names it.
-	 * {@code GlslTranslator.takeDayClock} is what reads this name and takes it.
+	 * <strong>This engine's name rather than the pack's, so that nothing has to be taken.</strong>
+	 * {@code worldTime} is taken into the block because a program gets a member only where its own
+	 * pack declared one and the corpus is not unanimous: four of the five packs studied write
+	 * {@code uniform int worldTime} and Solas never names it. A name no pack has written is declared
+	 * by this engine on every program the effects reach, which is one member and no question.
+	 * {@code GlslTranslator.takeDayClock} is what writes it.
 	 */
-	public static final String DAY_CLOCK = "worldTime";
+	public static final String DAY_CLOCK = "wynnDayClock";
 
 	/**
 	 * Three hundred units of effect time per Minecraft day, which is three hundred over the
@@ -398,16 +404,19 @@ public final class WynncraftPatch {
 	 * sky is a colour the drawing chose and not a limb at a distance.</li>
 	 * <li><strong>The self-lit lift last.</strong> It reads the same two things the glint does - the
 	 * decoded number and the texture - and both have to be settled before it can decide whether this
-	 * fragment is a tint, which is the one case it excuses.</li>
+	 * fragment is a tint, which is the one case it excuses. It is the one step of the seven that
+	 * answers to a second switch as well as to the sky: the mesh's own flags can ask for the light
+	 * tweaks to stand, and a mesh that asked has been lit by the server already.</li>
 	 * </ol>
 	 * <p>
-	 * <strong>Three of the seven carry a guard on the sky and four do not, which is WynnIris's own
+	 * <strong>Four of the seven carry a guard on the sky and three do not, which is WynnIris's own
 	 * split rather than an oversight.</strong> The unlit correction, the item tint, the fade and
 	 * the lift are guarded because each would otherwise act on a colour the drawing chose and did
 	 * not produce. The glint and the reduction are not, and do not need to be: both read the
 	 * carried colour, and a skybox mesh carries neither an effect number nor a translucency level,
 	 * so each is already a branch that is not taken. Guarding them would be the same picture with
-	 * two comparisons more.
+	 * two comparisons more. The third that is not guarded is the sky itself, which stands first and
+	 * has nothing above it to be guarded against.
 	 * <p>
 	 * The alpha is clamped to the target rather than multiplied by it, and the difference is
 	 * WynnIris's own correction rather than a preference: a pack that already carried the reduced
@@ -472,14 +481,16 @@ public final class WynncraftPatch {
 				.append(colour).append("); ");
 
 		// The flags WynnIris reads out of the block entity's own identifier
-		// ({@code EntityPatcher.java:1409-1411}): one or three skip the item tint, two and above
-		// would skip light tweaks this patch has not got. The identifier is unsigned on this mesh
-		// and nought six five five three five where WynnIris reads minus one, and minus one divided
-		// by the radix is nought where six five five three five divided by it is three - so the one
-		// spelling that keeps the two engines answering alike on a draw nothing mapped is the one
-		// that puts the minus one back before it divides.
+		// ({@code EntityPatcher.java:1409-1412}): one or three skip the item tint, and two and above
+		// ask for the entity light tweaks to stand - which is one tweak here, the self-lit lift, and
+		// it is withheld on the same flag WynnIris withholds its own pair on. The identifier is
+		// unsigned on this mesh and nought six five five three five where WynnIris reads minus one,
+		// and minus one divided by the radix is nought where six five five three five divided by it
+		// is three - so the one spelling that keeps the two engines answering alike on a draw
+		// nothing mapped is the one that puts the minus one back before it divides.
 		statements.append("int wynnInfoFlags = (blockEntityId == 65535 ? -1 : blockEntityId) / 16384; ");
 		statements.append("bool wynnSkipTint = wynnInfoFlags == 1 || wynnInfoFlags == 3; ");
+		statements.append("bool wynnSkipLights = wynnInfoFlags >= 2; ");
 
 		// The tint the game asked for, out of the pair a vanilla shader multiplies together and a
 		// pack multiplies only the first of: the vertex colour this engine carries raw, and the
@@ -520,7 +531,13 @@ public final class WynncraftPatch {
 				.append("; } ");
 
 		if (sampler != null) {
-			statements.append("if (!wynnSkyApplied) ")
+			// Two guards and not one, which is the pair WynnIris closes its whole light-tweak block
+			// with ({@code EntityPatcher.java:1497}). The first is the one the unlit correction
+			// above carries: a sky is a colour the drawing chose, and lifting it to the art's own
+			// colour is a change to a colour no pack produced. The second is the mesh's own flags,
+			// and what it is for is an art the server has already lit itself - a lift there would
+			// be the second helping of a brightness that was painted on.
+			statements.append("if (!wynnSkyApplied && !wynnSkipLights) ")
 					.append(WynncraftShading.emissive(output, sampler, "wynnEffect"));
 		}
 
@@ -666,7 +683,7 @@ public final class WynncraftPatch {
 		code.append("if (wynnSkyId > 0) { ");
 		code.append("if (wynnSkyId == ").append(SKY_PRIMARY).append(" || wynnSkyId == ")
 				.append(SKY_RECENT).append(") { discard; } ");
-		code.append("float wynnSkyTime = fract(float(").append(DAY_CLOCK).append(") / ")
+		code.append("float wynnSkyTime = fract(").append(DAY_CLOCK).append(" / ")
 				.append(DAY_TICKS).append(") * ").append(SKY_TIME_UNITS).append("; ");
 		code.append(output).append(" = ").append(WynncraftSkybox.APPLY_NAME)
 				.append("(wynnSkyId, wynnSkyTime, normalize(")
@@ -733,7 +750,7 @@ public final class WynncraftPatch {
 		code.append("vec2 wynnSize = vec2(textureSize(").append(sampler).append(", 0)); ");
 		code.append("bool wynnAtlas = max(wynnSize.x, wynnSize.y) > 2000.0; ");
 		code.append("vec2 wynnUv = ").append(uv).append("; ");
-		code.append("float wynnTime = float(").append(DAY_CLOCK).append(") * ")
+		code.append("float wynnTime = ").append(DAY_CLOCK).append(" * ")
 				.append(DAY_CLOCK_SCALE).append("; ");
 		code.append("vec4 wynnSample = texture(").append(sampler).append(", wynnUv); ");
 		code.append("vec2 wynnEuv; if (wynnAtlas) { ");

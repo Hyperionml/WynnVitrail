@@ -4648,19 +4648,14 @@ public final class GlslTranslator {
 	}
 
 	/**
-	 * Takes the day clock into the block, on a program whose pack did not declare it.
+	 * Takes the day clock into the block, on every program the effects reach.
 	 * <p>
-	 * <strong>A uniform this engine has and a pack of the corpus may not.</strong>
-	 * {@code worldTime} is published by {@code uniform/values/TimeValues} like every other engine
-	 * value, but a program gets a block member only if its pack declared one, and the packs differ:
-	 * BSL, iterationT, iterationRP and Complementary all write {@code uniform int worldTime}, and
-	 * Solas never names it. So the member is taken here rather than assumed, and a glint on Solas
-	 * would otherwise be code reading a name its own block has not got.
-	 * <p>
-	 * Asked of the block and not of the pack's text, which is the same question one step later: what
-	 * matters is whether this stage already has such a member, whichever unit it came from or
-	 * whether an include put it there. The declaration given here is the one the packs write, so a
-	 * pack that wrote it gets the member it already had and this changes nothing.
+	 * <strong>This engine's own name and not one of the pack's, which is what makes it one line
+	 * where it used to be a question.</strong> The patch animates on the day with the frame's
+	 * fraction of a tick on it, and no pack of the corpus declares that under any name: their own
+	 * {@code worldTime} is an {@code int} of whole ticks. So the member is written here rather than
+	 * looked for, and Solas - which never names {@code worldTime} at all - is served the same way
+	 * as BSL, which does. {@code WynncraftPatch#DAY_CLOCK} carries why the fraction is owed.
 	 * <p>
 	 * It is one of the {@code take*} family above and follows their rule: the name goes into
 	 * {@code injectedNames} as well, because the member is this engine's and the pack's body never
@@ -4671,11 +4666,7 @@ public final class GlslTranslator {
 	 * ({@code ProgramTranslator.render}), so the vertex stage declares what this took without asking.
 	 */
 	private void takeDayClock() {
-		if (this.blockMembers.containsKey(WynncraftPatch.DAY_CLOCK)) {
-			return;
-		}
-
-		record(this.blockMembers, WynncraftPatch.DAY_CLOCK, "int " + WynncraftPatch.DAY_CLOCK);
+		record(this.blockMembers, WynncraftPatch.DAY_CLOCK, "float " + WynncraftPatch.DAY_CLOCK);
 		this.injectedNames.add(WynncraftPatch.DAY_CLOCK);
 	}
 

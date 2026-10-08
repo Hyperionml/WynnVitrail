@@ -218,11 +218,14 @@ class WynncraftEntityProgramTest {
 					"the library is written and never called with this program's texture:\n"
 							+ fragment);
 
-			// The day the effects animate on, taken into the block because a pack of the corpus may
-			// not declare it, and scaled from ticks to the three hundred units a day WynnIris uses.
-			assertTrue(fragment.contains("int worldTime;"),
+			// The day the effects animate on, taken into the block because it is this engine's own
+			// name rather than the pack's, and scaled from ticks to the three hundred units a day
+			// WynnIris uses. A float with the frame's fraction of a tick on it and not the pack's
+			// whole-tick int: a sky is twelve thousand units of a day, so the integer would step
+			// half a unit twenty times a second where WynnIris slides.
+			assertTrue(fragment.contains("float wynnDayClock;"),
 					"the day clock is read and never declared:\n" + fragment);
-			assertTrue(fragment.contains("float(worldTime) * 0.0125"),
+			assertTrue(fragment.contains("wynnDayClock * 0.0125"),
 					"the clock is read in the wrong unit:\n" + fragment);
 
 			// The order, which is the one thing about the pair that a still picture could not show:
@@ -381,8 +384,9 @@ class WynncraftEntityProgramTest {
 
 			// The time, in the shape WynnIris writes it and against this engine's own day clock: the
 			// day is a fraction there and ticks here, so it is divided back out before being taken
-			// up to the pack's twelve thousand.
-			assertTrue(fragment.contains("fract(float(worldTime) / 24000.0) * 12000.0"),
+			// up to the pack's twelve thousand. Read from the clock that carries the frame's
+			// fraction, so that a sky moves between ticks as WynnIris's does.
+			assertTrue(fragment.contains("fract(wynnDayClock / 24000.0) * 12000.0"),
 					"the sky is drawn at the wrong hour:\n" + fragment);
 
 			// The direction, off the mesh's own position, which is the one thing a box-shaped sky
@@ -403,11 +407,20 @@ class WynncraftEntityProgramTest {
 			// twice, because the two are guarded separately and one of them guarded alone is a sky
 			// divided by the light the pack had baked in. The brace after the guard is the
 			// correction's own block, which is why there is only one of them.
+			//
+			// The lift carries a SECOND guard the unlit correction has not got, and it is the
+			// mesh's own flags rather than the sky: a mesh that asked for the light tweaks to stand
+			// has been lit by the server already, and WynnIris withholds its own pair on the same
+			// flag ({@code EntityPatcher.java:1412}, {@code :1497}).
 			assertTrue(fragment.contains("if (!wynnSkyApplied) { vec4 wynnShadingTexel"),
 					"the unlit correction would act on a sky:\n" + fragment);
-			assertTrue(fragment.lastIndexOf("if (!wynnSkyApplied) {")
+			assertTrue(fragment.contains(
+							"if (!wynnSkyApplied && !wynnSkipLights) { vec4 wynnShadingTexel"),
+					"the self-lit lift ignores the flags the mesh carries:\n" + fragment);
+			assertTrue(fragment.indexOf("if (!wynnSkyApplied && !wynnSkipLights)")
 							> fragment.indexOf("if (wynnLevel > 0) { "),
-					"the self-lit lift is not guarded, or not after the reduction:\n" + fragment);
+					"the self-lit lift runs before the reduction has settled the alpha:\n"
+							+ fragment);
 		});
 	}
 
@@ -510,10 +523,17 @@ class WynncraftEntityProgramTest {
 
 			// The flags, with the one spelling that keeps the two engines alike: the identifier is
 			// unsigned here and the unmapped value is six five five three five, which divided by
-			// the radix is three where WynnIris's minus one divides to nought.
+			// the radix is three where WynnIris's minus one divides to nought. Both that ride on
+			// them are read: the tint stands where the flags ask, and the light tweaks stand from
+			// two upwards.
 			assertTrue(fragment.contains(
 					"int wynnInfoFlags = (blockEntityId == 65535 ? -1 : blockEntityId) / 16384;"),
 					"the flags are not read off the identifier:\n" + fragment);
+			assertTrue(fragment.contains(
+							"bool wynnSkipTint = wynnInfoFlags == 1 || wynnInfoFlags == 3;"),
+					"the flags that ask for the tint to stand are not read:\n" + fragment);
+			assertTrue(fragment.contains("bool wynnSkipLights = wynnInfoFlags >= 2;"),
+					"the flags that ask for the light tweaks to stand are not read:\n" + fragment);
 
 			// The tint itself: the pair the vanilla shader multiplies together, gated on the draw
 			// being an item the game told the id of, and mixed in by how far the tint is from
