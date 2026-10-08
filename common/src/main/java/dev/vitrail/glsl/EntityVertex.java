@@ -109,11 +109,23 @@ public final class EntityVertex {
 	public static final List<String> APPENDED = List.of(IDENTIFIERS, MID_TEX_COORD, TANGENT);
 
 	/**
+	 * The element of the mesh that carries the tint the game baked into the vertex, which is the
+	 * colour a pack reads as {@code gl_Color}.
+	 * <p>
+	 * Named here because two things name it and one of them cannot spell the macro the head defines
+	 * over it. The head defines {@code of_Color} as this element, and the Wynncraft patch redefines
+	 * that macro to take a signal out of the pack's own reads
+	 * ({@code WynncraftPatch.neutralisation}), so the patch has to copy the untouched element
+	 * forward and cannot say it with the name it just redefined.
+	 */
+	public static final String COLOUR = "Color";
+
+	/**
 	 * The elements of the entity mesh, in the format's own order, the six the game lays out and the
 	 * three this engine appends after them. {@code EntityMesh} is what appends them.
 	 */
 	public static final List<String> ATTRIBUTES = Stream.concat(
-			Stream.of("Position", "Color", "UV0", "UV1", "UV2", "Normal"), APPENDED.stream())
+			Stream.of("Position", COLOUR, "UV0", "UV1", "UV2", "Normal"), APPENDED.stream())
 			.toList();
 
 	/**
@@ -173,7 +185,7 @@ public final class EntityVertex {
 		String light = fullbright ? FULL_LIGHT : "vec4(UV2, 0.0, 1.0)";
 
 		lines.add("#define of_Vertex vec4(Position, 1.0)");
-		lines.add("#define of_Color Color");
+		lines.add("#define of_Color " + COLOUR);
 		lines.add("#define of_MultiTexCoord0 vec4(UV0, 0.0, 1.0)");
 		lines.add("#define of_MultiTexCoord1 " + light);
 		// Unit two is a second name for the light map and not a unit of its own, which is what Iris

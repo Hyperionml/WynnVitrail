@@ -16,6 +16,8 @@ import dev.vitrail.pack.model.TargetName;
 import dev.vitrail.pack.texture.CustomImages;
 import dev.vitrail.pack.texture.CustomImageView;
 import dev.vitrail.pack.texture.VolumeAtlas;
+import dev.wynnvitrail.WynncraftPatch;
+import dev.wynnvitrail.WynncraftSettings;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -116,6 +118,19 @@ public final class GlslTranslator {
 	static final String FRONT_COLOUR = "of_FrontColor";
 
 	/**
+	 * The mesh's own vertex colour under the name the packs write, which each head of a mesh that
+	 * carries one defines from its format's colour element ({@link EntityVertex#prologue} among
+	 * them; {@link #FRONT_COLOUR} above is the write side of the same legacy name).
+	 * <p>
+	 * Named here rather than left as a literal because it has a second reader now. The Wynncraft
+	 * patch redefines this name on the vertex stage to take a signal out of the pack's own reads,
+	 * and the value it hides has to be copied forward out of the same element this macro points at -
+	 * so the element is named too, in {@link EntityVertex#COLOUR}, and the two spellings are one
+	 * spelling or a mistake.
+	 */
+	static final String VERTEX_COLOUR = "of_Color";
+
+	/**
 	 * The hit flash and the damage tint, which is a varying wherever the mesh carries the overlay and
 	 * a uniform everywhere else.
 	 * <p>
@@ -154,6 +169,40 @@ public final class GlslTranslator {
 	 * and this loses the type. No pack of the corpus writes one.
 	 */
 	static final List<String> ENTITY_IDS = List.copyOf(LegacyGlsl.ENTITY_UNIFORMS.keySet());
+
+	/**
+	 * The entity's own vertex colour, carried to the fragment stage as a varying beside the overlay
+	 * colour and the three identifiers.
+	 * <p>
+	 * <strong>It is the fixed function colour under a name of its own, and the name is why.</strong>
+	 * The colour a mesh carries is spelled {@code of_Color} in the vertex stage, where
+	 * {@link EntityVertex#prologue} turns it into the {@code Color} element with a define, and a
+	 * varying of the same name could not live beside that define: the substitution would rewrite the
+	 * varying's own declaration into a second declaration of the attribute. So the varying is
+	 * {@code of_VertexColor} and the vertex stage fills it out of the element itself on its way out,
+	 * which is one line and keeps the pack's spelling of the attribute untouched.
+	 * <p>
+	 * <strong>Without it the fragment stage cannot see the colour at all, and Iris's packs read
+	 * it.</strong> OptiFine keeps {@code gl_Color} interpolated and readable from both stages, and
+	 * Iris does the same: it hands the entity colour on as {@code iris_Color}
+	 * ({@code pipeline/transform/transformer/EntityPatcher.java:51}, declared an input at
+	 * {@code VanillaCoreTransformer.java:530}), which is the same value this varying carries. A pack
+	 * that reads it in its fragment stage, and the Wynncraft effects that read it there, got an
+	 * undeclared name before this.
+	 * <p>
+	 * Declared on both sides or on neither, off the union of what every stage asked for, exactly as
+	 * {@link #ENTITY_COLOR} is and for the same reason: only the vertex stage can write it and only
+	 * the fragment stage can need it, so the two have to be told the same answer.
+	 * <p>
+	 * It is asked of the mesh and of the body together, which is the narrower of the two gates
+	 * {@link #ENTITY_COLOR} already describes: an entity is what carries a colour, and a stage that
+	 * never mentions the name is left alone so that nothing shifts a location.
+	 * <p>
+	 * Public where its two neighbours above are not, and the difference is who wants it: the
+	 * Wynncraft patch weaves code into the pack's own text and has to spell the name there, so this
+	 * one is part of a contract rather than an internal of this class.
+	 */
+	public static final String ENTITY_VERTEX_COLOR = "of_VertexColor";
 
 	/**
 	 * The game's own overlay image, sixteen by sixteen, under a name no pack writes.
@@ -666,6 +715,17 @@ public final class GlslTranslator {
 	private boolean covers;
 
 	/**
+	 * Whether this fragment body was wrapped so that the Wynncraft effects have a statement to be
+	 * appended to, which is a reason of its own beside the alpha test and the mask.
+	 * <p>
+	 * The pack's {@code main} is renamed and this engine writes its own around it, and the Wynncraft
+	 * effects are written after the pack's body has run: they change the colour the pack has already
+	 * decided, so there is nowhere else for them to go. A pass that asks for neither an alpha test
+	 * nor a mask is not wrapped today, and this is what wraps it anyway.
+	 */
+	private boolean wynncraftEpilogue;
+
+	/**
 	 * Whether the fragment stage names {@code gl_FragDepth} anywhere at all, live branch or not.
 	 * <p>
 	 * Anywhere at all, because what it decides is which value the mask is filled from, and a stage
@@ -843,6 +903,11 @@ public final class GlslTranslator {
 		return (reduceTrig ? "trig-reduced" : "trig-driver")
 				+ (softCompare() ? " compare-in-shader" : " compare-on-sampler")
 				+ " shadow-chain-" + (shadowChainZero ? '1' : '0') + (shadowChainOne ? '1' : '0')
+				// The Wynncraft patch weaves text into the pack's programs and is off by default,
+				// so a unit translated with it off must not be served to a run with it on. Read off
+				// the settings rather than repeated here, so a state added to them is in the key or
+				// nowhere.
+				+ " wynncraft:" + WynncraftSettings.key()
 				+ " custom-views-v1:" + CustomImages.key();
 	}
 
@@ -897,6 +962,9 @@ public final class GlslTranslator {
 		// answer rather than each asking again.
 		planAlphaEpilogue();
 		planCoverage();
+		// Last of the three reasons to wrap, and asked in the same place for the same reason: the
+		// answer decides where the ascending call goes and whether a wrapper is written at all.
+		planWynncraft();
 		// Before the ascending call goes in, and that is the whole point: the call replaces the
 		// opening brace of main with text of ours, which is no longer an operator, so a brace
 		// counter run afterwards would walk past main without opening it and close one brace too
@@ -1012,6 +1080,14 @@ public final class GlslTranslator {
 			if (this.translator.inputs.overlay()) {
 				if (this.translator.used.contains(ENTITY_COLOR)) {
 					named.add(ENTITY_COLOR);
+				}
+
+				// The entity's own colour, by the same rule as the two around it: the mesh is what
+				// carries it and the two stages have to be told together. What puts the name in
+				// `used` is the patch rather than the pack, which is the only difference - see
+				// planWynncraft, which names it into injectedNames for exactly this to find.
+				if (this.translator.used.contains(ENTITY_VERTEX_COLOR)) {
+					named.add(ENTITY_VERTEX_COLOR);
 				}
 
 				for (String identifier : ENTITY_IDS) {
@@ -1247,7 +1323,7 @@ public final class GlslTranslator {
 		// gbuffers_textured serves a glint under this constant and a sky pass under another. Each
 		// stage adds what it names and the union hands both to both, the block being the program's
 		// rather than the stage's.
-		if (this.inputs == VertexInputs.GLINT && this.used.contains("of_Color")) {
+		if (this.inputs == VertexInputs.GLINT && this.used.contains(VERTEX_COLOUR)) {
 			block.add(TranslatedUnit.Uniform.of(LegacyGlsl.GLINT_ALPHA,
 					"float " + LegacyGlsl.GLINT_ALPHA));
 		}
@@ -4154,9 +4230,63 @@ public final class GlslTranslator {
 		this.covers = this.packMainName >= 0;
 	}
 
-	/** Whether the fragment stage's own {@code main} is wrapped, by the alpha test or by the mask. */
+	/**
+	 * Plans the Wynncraft patch for this stage: the name the varying carries, and the wrapper the
+	 * effects are appended to.
+	 * <p>
+	 * <strong>The varying is the patch's name and not the pack's.</strong> No pack writes
+	 * {@code of_VertexColor}, so the walk over the body that fills {@link #used} can never find it
+	 * and it is named here instead. Named into {@link #injectedNames} rather than added to
+	 * {@link #used} directly, and that is forced rather than tidy: {@code used} is rebuilt from the
+	 * body after {@link #dropUnprovidedInputs} takes an input out, and the pairing asks for the
+	 * varyings long after that, so a name held only in {@code used} would be gone by the time it
+	 * mattered. Both sides are told the same answer because both ask the same question of the same
+	 * mesh, which is what a varying needs.
+	 * <p>
+	 * <strong>The effects have nowhere else to go.</strong> They change the colour the pack has
+	 * already decided - a weapon's glint and a translucent model are both a change to the value the
+	 * pack's own body wrote - so the statements have to run after that body and inside a function of
+	 * ours, which is the wrapper the first two reasons already build. A stage that asks for neither
+	 * of those is not wrapped today, and without this one its effects would have nowhere to land.
+	 * <p>
+	 * The wrapper is asked of the application being non-empty, so the decode alone, which is what
+	 * the tests turn on, must not rename a pack's main for a statement that is never written.
+	 * <p>
+	 * The name is found the way {@link #planCoverage} finds it and before
+	 * {@link #orderFragmentOutputs} replaces the opening brace, for the same reason: after that pass
+	 * {@link #mainName} would walk past a body whose brace has become text of ours.
+	 * <p>
+	 * A stage with no colour output is refused, and that is a gate the other two reasons carry
+	 * implicitly rather than a preference: the application writes the output, so there would be
+	 * nothing to write. It is also what keeps {@link #wrapsFragment} implying that
+	 * {@link #orderFragmentOutputs} will set its flag, which the wrapper relies on when it calls the
+	 * ascending function - a stage refused there and wrapped here would call a function the header
+	 * never declared.
+	 */
+	private void planWynncraft() {
+		if (!WynncraftPatch.carriesColour(this.stage, this.inputs)) {
+			return;
+		}
+
+		this.injectedNames.add(ENTITY_VERTEX_COLOR);
+
+		if (!WynncraftSettings.effects() || this.maxFragmentOutput < 0) {
+			return;
+		}
+
+		if (this.packMainName < 0) {
+			this.packMainName = mainName();
+		}
+
+		this.wynncraftEpilogue = this.packMainName >= 0;
+	}
+
+	/**
+	 * Whether the fragment stage's own {@code main} is wrapped, by the alpha test, by the mask or by
+	 * the Wynncraft effects.
+	 */
 	private boolean wrapsFragment() {
-		return this.alphaEpilogue || this.covers;
+		return this.alphaEpilogue || this.covers || this.wynncraftEpilogue;
 	}
 
 	/**
@@ -4194,9 +4324,9 @@ public final class GlslTranslator {
 	 * as this engine wants it. A stage that did arithmetic on the depth it reads back would be
 	 * working in the reversed volume rather than the OpenGL one the pack was written against.
 	 * <p>
-	 * A fragment stage is wrapped for two reasons, the alpha test and the coverage mask, decided in
-	 * {@link #planAlphaEpilogue} and {@link #planCoverage}. The same wrapping argument holds and the
-	 * same header carries it.
+	 * A fragment stage is wrapped for three reasons, the alpha test, the coverage mask and the
+	 * Wynncraft effects, decided in {@link #planAlphaEpilogue}, {@link #planCoverage} and
+	 * {@link #planWynncraft}. The same wrapping argument holds and the same header carries it.
 	 */
 	private void wrapMain() {
 		if (this.stage == ProgramStage.FRAGMENT) {

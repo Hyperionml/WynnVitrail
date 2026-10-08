@@ -9,6 +9,7 @@ import dev.vitrail.pack.model.AlphaTest;
 import dev.vitrail.pack.model.ProgramStage;
 import dev.vitrail.pack.texture.CustomImages;
 import dev.vitrail.pack.texture.VolumeAtlas;
+import dev.wynnvitrail.WynncraftPatch;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -140,8 +141,13 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 				}
 				case TERRAIN, TERRAIN_SEPARATE_AO -> lines.addAll(SodiumVertex.prologue(this.bound,
 						this.used, this.synthesized, this.inputs.separateAo()));
-				case ENTITY, ENTITY_FULLBRIGHT -> lines.addAll(
-						EntityVertex.prologue(this.used, this.synthesized, this.inputs.fullbright()));
+				case ENTITY, ENTITY_FULLBRIGHT -> {
+					lines.addAll(EntityVertex.prologue(this.used, this.synthesized,
+							this.inputs.fullbright()));
+					// Below the head that defines it and above the body that reads it, which is the
+					// only place the redefinition can stand. See WynncraftPatch.neutralisation.
+					lines.addAll(WynncraftPatch.neutralisation(this.stage, this.inputs));
+				}
 				case GLINT -> lines.addAll(GlintVertex.prologue(this.used, this.synthesized));
 				case CRUMBLING -> lines.addAll(CrumblingVertex.prologue(this.used, this.synthesized));
 				case MOVING_BLOCK -> lines.addAll(
@@ -320,6 +326,14 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 		// is most of them, has its declaration flattened and owes no helper.
 		this.readVolumes.forEach((name, atlas) -> lines.addAll(VolumeFlattening.helper(name, atlas)));
 
+		// The Wynncraft signal decode, on both stages of an entity program: the vertex stage calls it
+		// to hide a signal from the pack's own colour reads and the fragment stage calls it to spend
+		// one. Written here, above the body, because the wrapper that calls it is written below the
+		// body: the language wants a function declared before its first call and the header is the
+		// only place above everything. Empty for every other stage, and for a run with the patch
+		// switched off, which is what keeps an unpatched translation byte for byte what it was.
+		lines.addAll(WynncraftPatch.helpers(this.stage, this.inputs));
+
 		// Declared on both sides or on neither, whether this stage reads it or not. A varying the
 		// vertex writes and the fragment never mentions is accepted in silence and shifts the
 		// location of everything declared after it.
@@ -342,6 +356,15 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 		if (varyings.contains(GlslTranslator.ENTITY_COLOR)) {
 			lines.add((this.stage == ProgramStage.VERTEX ? "out" : "in") + " vec4 "
 					+ GlslTranslator.ENTITY_COLOR + ";");
+		}
+
+		// The mesh's own vertex colour, handed on under a name of its own so that the fragment stage
+		// can read it: the pack's spelling is a macro over the {@code Color} attribute on the vertex
+		// side and nothing at all on the fragment side. GlslTranslator.ENTITY_VERTEX_COLOR carries
+		// why it is a second name and not that one, and why the two sides are told together.
+		if (varyings.contains(GlslTranslator.ENTITY_VERTEX_COLOR)) {
+			lines.add((this.stage == ProgramStage.VERTEX ? "out" : "in") + " vec4 "
+					+ GlslTranslator.ENTITY_VERTEX_COLOR + ";");
 		}
 
 		// And the same rule again for the three identifiers, with the qualifier the language demands
@@ -507,6 +530,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 				+ (this.distantPrologue ? DistantVertex.PROLOGUE + "(); " : "")
 				+ overlayPrologue()
 				+ identifierPrologue(varyings)
+				+ vertexColourPrologue()
 				+ (wrapsFragment() ? GlslTranslator.ORDER_OUTPUTS + "(); " : "")
 				+ coveragePrologue()
 				+ owedPrologue()
@@ -517,6 +541,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 				+ this.splits.matrixEpilogue()
 				+ this.splits.structEpilogue()
 				+ this.splits.arrayEpilogue()
+				+ wynncraftEpilogue(shadowed)
 				+ (this.depthEpilogue ? " gl_Position.z = " + GlslTranslator.DEPTH_CONV
 						+ ".x * gl_Position.z + " + GlslTranslator.DEPTH_CONV
 						+ ".y * gl_Position.w;" : "")
@@ -635,6 +660,61 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Alph
 		}
 
 		return written.toString();
+	}
+
+	/**
+	 * Hands the mesh's own vertex colour on to the fragment stage, on the vertex stage and ahead of
+	 * the pack's body.
+	 * <p>
+	 * <strong>Out of the element and not out of the name the pack reads.</strong> With the Wynncraft
+	 * patch on, that name has been redefined to hide the signal from the pack
+	 * ({@code WynncraftPatch.neutralisation}), and the whole point of this varying is to carry what
+	 * was hidden: the decode in the fragment stage reads it to find the effect whose number the pack
+	 * was just stopped from seeing. Iris carries the same value under {@code iris_Color} for the same
+	 * reason.
+	 * <p>
+	 * <strong>Ahead of the body, as Iris writes it</strong> ({@code prependMainFunctionBody} beside
+	 * its {@code vaColor} rename, {@code VanillaCoreTransformer.java:462-506}) rather than with the
+	 * epilogues below. Nothing the pack's body can do to the colour is missed by it: the name the
+	 * packs read is a macro over an attribute on this mesh and a write through it would not compile,
+	 * so the value cannot move. And the body is free to leave early - an early {@code return} is not
+	 * something a vertex stage of the corpus does, and an assignment below one would be an assignment
+	 * that sometimes does not happen, which is a varying the fragment stage reads as undefined.
+	 * <p>
+	 * Empty on the fragment stage, where there is nothing to copy from. The varying is declared on
+	 * both sides and written on one, which is what a varying is.
+	 */
+	private String vertexColourPrologue() {
+		if (this.stage != ProgramStage.VERTEX
+				|| !WynncraftPatch.carriesColour(this.stage, this.inputs)) {
+			return "";
+		}
+
+		return GlslTranslator.ENTITY_VERTEX_COLOR + " = " + EntityVertex.COLOUR + "; ";
+	}
+
+	/**
+	 * The Wynncraft effects, after the pack's own body has run and left its colour in the output.
+	 * <p>
+	 * Before the alpha test and the mask, and the order is not arbitrary: the translucency reduces
+	 * the alpha the pack wrote, so a discard reading the reduced value is the one that agrees with
+	 * what the mask then fills in. The mask stays last of all, for the reason the wrapper's comment
+	 * gives.
+	 * <p>
+	 * The statement names what the pack's first colour output ended up as, which is its own name
+	 * where it declared one: this is text of ours standing in the pack's own {@code main}, so the
+	 * body's write is under whichever name that body kept.
+	 * <p>
+	 * Refused where the stage has no colour output at all, which is a stage with nothing for the
+	 * application to write. {@link GlslTranslator#planWynncraft} refuses the wrapper in the same
+	 * case; this one is what covers a body wrapped for another reason, a split most of all.
+	 */
+	private String wynncraftEpilogue(Set<String> shadowed) {
+		if (this.maxFragmentOutput < 0) {
+			return "";
+		}
+
+		return WynncraftPatch.epilogue(this.stage, this.inputs, outputName(0, shadowed));
 	}
 
 	/** What output {@code slot} is called, which is the pack's own name when it declared one. */
