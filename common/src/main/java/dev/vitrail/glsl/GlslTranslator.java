@@ -252,6 +252,26 @@ public final class GlslTranslator {
 	public static final String ENTITY_VERTEX_POSITION = "of_VertexPosition";
 
 	/**
+	 * How far the vertex's limb has faded, carried beside the three above and written by the
+	 * emote decode alone.
+	 * <p>
+	 * <strong>A number the mesh never held, which is what sets it apart from the three beside
+	 * it.</strong> The colour, the coordinate and the position are all copied off elements the
+	 * mesh carries; the fade is COMPUTED, in the vertex stage, out of the limb's fade mode and the
+	 * distance of the decoded position through the draw's model view, and the fragment stage
+	 * multiplies the pack's colour by it and throws the limb away where it has faded to nothing
+	 * ({@code WynncraftPatch.epilogue}). Iris carries the same number under
+	 * {@code iris_wynncraft_nearfade} for the same two spends ({@code EntityPatcher.java:1404},
+	 * applied at {@code :1408} and {@code :1494}).
+	 * <p>
+	 * Written one and not nought where the decode is off, because the varying is declared on both
+	 * sides wherever the signals are carried at all and a varying nothing wrote is one the
+	 * fragment reads as undefined: nought would throw every limb of every ordinary mob away, so
+	 * the wrapper that has no decode to run writes one.
+	 */
+	public static final String ENTITY_VERTEX_NEAR_FADE = "of_VertexNearFade";
+
+	/**
 	 * The values this engine carries from the entity mesh to the fragment stage for the Wynncraft
 	 * patch, each with the type both stages declare it under.
 	 * <p>
@@ -268,7 +288,8 @@ public final class GlslTranslator {
 			new Carry(ENTITY_VERTEX_COLOR, "vec4"),
 			new Carry(ENTITY_VERTEX_UV, "vec2"),
 			new Carry(ENTITY_VERTEX_MID_TEX, "vec2"),
-			new Carry(ENTITY_VERTEX_POSITION, "vec3"));
+			new Carry(ENTITY_VERTEX_POSITION, "vec3"),
+			new Carry(ENTITY_VERTEX_NEAR_FADE, "float"));
 
 	/** One of {@link #ENTITY_CARRY}: a varying's name and the type both stages declare it under. */
 	record Carry(String name, String type) {
@@ -4344,11 +4365,37 @@ public final class GlslTranslator {
 			this.injectedNames.add(carried.name());
 		}
 
+		// The game's own transforms block, taken for the emote decode alone: it reads the matrix
+		// the game prepared the draw with, both to measure the fade's distance and to keep the
+		// decode out of the interface draws whose matrix is the identity. A pack that never names
+		// a model view would leave the block undeclared, so the counter that declares it is walked
+		// here rather than left to a read that never happens - and the same counter is what tells
+		// the runtime to bind the block, which the entity door does for every draw that asks.
+		if (WynncraftPatch.emotes(this.stage, this.inputs)) {
+			this.gameModelView++;
+			this.injectedNames.add(LegacyGlsl.GAME_MODEL_VIEW);
+		}
+
 		if (!WynncraftPatch.applies(this.stage, this.inputs) || this.maxFragmentOutput < 0) {
 			return;
 		}
 
 		takeDayClock();
+
+		// The item tint's two inputs, named into the text the same way the day clock is taken: the
+		// identifier an item draw carries its id on, and the block entity's, whose high bits carry
+		// the flags that can ask for the tint to stand. Both are identifiers the mesh already
+		// serves, but the union only declares the ones somebody named, and the somebody here is
+		// the application rather than the pack.
+		this.injectedNames.add("currentRenderedItemId");
+		this.injectedNames.add("blockEntityId");
+
+		// The game's own transforms block again, on the fragment stage this time: the item tint
+		// reads the colour modulator out of it, and the counter that declares the block is walked
+		// here rather than left to a pack's read that may never happen. The vertex stage has
+		// already taken it for the emote's identity check; the two increments are one block each on
+		// the stage that asked, and the runtime binds the one slice for both.
+		this.gameModelView++;
 
 		// The same gate planAlphaEpilogue carries two methods up, and for the same reason: a slot
 		// nought the pack declared under another type has no alpha to write, and .a on a vec3 is not

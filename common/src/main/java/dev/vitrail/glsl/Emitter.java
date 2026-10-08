@@ -148,6 +148,11 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 					// Below the head that defines it and above the body that reads it, which is the
 					// only place the redefinition can stand. See WynncraftPatch.neutralisation.
 					lines.addAll(WynncraftPatch.neutralisation(this.stage, this.inputs));
+					// The same place and the same trick for the emote's two names, and the same
+					// gate: the pack's own geometry and texture reads are pointed at the decoded
+					// values the wrapper fills ahead of its body. See
+					// WynncraftPatch.emoteRedirect.
+					lines.addAll(WynncraftPatch.emoteRedirect(this.stage, this.inputs));
 				}
 				case GLINT -> lines.addAll(GlintVertex.prologue(this.used, this.synthesized));
 				case CRUMBLING -> lines.addAll(CrumblingVertex.prologue(this.used, this.synthesized));
@@ -696,6 +701,28 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 		}
 
 		StringBuilder assignments = new StringBuilder();
+
+		// The emote decode, ahead of every carry below it: the coordinate the effects sample is
+		// the REMAPPED one - a limb's own region of the skin rather than the head's the mesh
+		// stored - and WynnIris carries the same remapped pair under
+		// iris_wynncraft_texcoord (EntityPatcher.java:1262). Without the decode the pair is the
+		// elements unchanged, which is what an ordinary mesh carries and what the fade of one
+		// stands at: every limb of every mob that is not an emote decodes on its first line.
+		if (WynncraftPatch.emotes(this.stage, this.inputs)) {
+			assignments.append(WynncraftPatch.emoteDecode());
+			assignments.append(GlslTranslator.ENTITY_VERTEX_COLOR).append(" = ")
+					.append(EntityVertex.COLOUR).append("; ");
+			assignments.append(GlslTranslator.ENTITY_VERTEX_UV).append(" = ")
+					.append(WynncraftPatch.emoteUv()).append("; ");
+			assignments.append(GlslTranslator.ENTITY_VERTEX_MID_TEX).append(" = ")
+					.append(EntityVertex.MID_TEX_COORD).append("; ");
+			assignments.append(GlslTranslator.ENTITY_VERTEX_POSITION).append(" = ")
+					.append(EntityVertex.POSITION).append("; ");
+			assignments.append(GlslTranslator.ENTITY_VERTEX_NEAR_FADE).append(" = ")
+					.append(WynncraftPatch.emoteFade()).append("; ");
+			return assignments.toString();
+		}
+
 		assignments.append(GlslTranslator.ENTITY_VERTEX_COLOR).append(" = ")
 				.append(EntityVertex.COLOUR).append("; ");
 		assignments.append(GlslTranslator.ENTITY_VERTEX_UV).append(" = ")
@@ -704,6 +731,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 				.append(EntityVertex.MID_TEX_COORD).append("; ");
 		assignments.append(GlslTranslator.ENTITY_VERTEX_POSITION).append(" = ")
 				.append(EntityVertex.POSITION).append("; ");
+		assignments.append(GlslTranslator.ENTITY_VERTEX_NEAR_FADE).append(" = 1.0; ");
 
 		return assignments.toString();
 	}
@@ -745,8 +773,18 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 			return "";
 		}
 
+		// The second output, told only where the pack wrote one. Two roads can have written it: its
+		// own declaration, lifted into the header and sitting in the map, or the gl_FragData[1] a
+		// legacy pack writes, renamed in the body and declared by the header but never entered
+		// into the map, which is why the count is told of the highest slot either road raised
+		// rather than of the map's size. The name is the pack's own where it declared one and the
+		// synthesized one where it did not, which is the identifier BSL lights its entities out
+		// of either way. The one step that spends it is withheld with either half missing, which
+		// is WynnIris's own gate ({@code EntityPatcher.java:1490-1492}).
+		String second = this.maxFragmentOutput >= 1 ? outputName(1, shadowed) : null;
+
 		return WynncraftPatch.epilogue(this.stage, this.inputs, outputName(0, shadowed),
-				this.atlasSampler);
+				second, this.used.contains("vlAlbedo"), this.atlasSampler);
 	}
 
 	/** What output {@code slot} is called, which is the pack's own name when it declared one. */

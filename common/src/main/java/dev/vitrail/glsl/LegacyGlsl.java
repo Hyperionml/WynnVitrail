@@ -190,6 +190,23 @@ public final class LegacyGlsl {
 	public static final String GAME_TEXTURE_MATRIX = "of_GameTextureMatrix";
 
 	/**
+	 * The colour the game modulates a whole draw by, as a member of the game's own transforms
+	 * block beside {@link #GAME_MODEL_VIEW} and {@link #GAME_TEXTURE_MATRIX}.
+	 * <p>
+	 * Named here for the one reader outside the block's own declaration: the Wynncraft patch reads
+	 * it beside the vertex colour, because the vanilla entity shader multiplies the two together
+	 * and a pack that multiplies only the vertex colour drops whatever the game chose to deliver
+	 * through the modulator - which is where a dyed item's tint arrives on the item paths the
+	 * game draws ({@code WynncraftPatch.itemTint} carries the whole argument).
+	 * <p>
+	 * White for every draw the game prepares from a render type, which is the same thing the
+	 * texture matrix's own note says of the offset beside it: the modulator is the shader colour
+	 * the game sets when it wants a whole draw tinted, and a render type's own setup leaves it
+	 * alone.
+	 */
+	public static final String GAME_COLOR_MODULATOR = "of_GameColorModulator";
+
+	/**
 	 * How strong an enchantment's glint is drawn, which is a setting of the player's and the one
 	 * thing a glint's vertex colour is made of.
 	 * <p>

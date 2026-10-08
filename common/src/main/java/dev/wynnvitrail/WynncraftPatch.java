@@ -1,6 +1,8 @@
 package dev.wynnvitrail;
 
+import dev.vitrail.glsl.EntityVertex;
 import dev.vitrail.glsl.GlslTranslator;
+import dev.vitrail.glsl.LegacyGlsl;
 import dev.vitrail.glsl.VertexInputs;
 import dev.vitrail.pack.model.ProgramStage;
 
@@ -168,6 +170,100 @@ public final class WynncraftPatch {
 	}
 
 	/**
+	 * Whether this stage decodes the player emotes, which is the vertex stage alone.
+	 * <p>
+	 * <strong>The same gate as {@link #neutralises} and not the decode's own, because the emote is
+	 * a change to what the pack's own reads see rather than a signal spent on a branch.</strong>
+	 * The decode rewrites the position and the coordinate the pack draws with, which is the
+	 * neutralisation's trick pointed the other way: that hides a value the mesh carries, this
+	 * replaces one. A run with the patch off is therefore left with the mesh as stored, which is
+	 * the state a pack without the patch would draw and the state the switch exists to restore.
+	 * <p>
+	 * The fragment stage asks the same question and is answered no by the stage test, which is
+	 * what keeps the two halves told apart: the decode writes globals the fragment cannot name,
+	 * and the fragment's half of the emote is the fade it was handed, spent in
+	 * {@link #epilogue}.
+	 */
+	public static boolean emotes(ProgramStage stage, VertexInputs inputs) {
+		return neutralises(stage, inputs);
+	}
+
+	/**
+	 * The lines that point the pack's own position and coordinate reads at the decoded values, for
+	 * the vertex header.
+	 * <p>
+	 * <strong>Two redefinitions of the names the head defines, and nothing else.</strong> The
+	 * emote decode writes a pair of globals before the pack's own main is called, and these make
+	 * the pack read that pair instead of the elements it was stored as. WynnIris reaches the same
+	 * end by rewriting every read of {@code vaPosition} and {@code vaUV0} to its own pair
+	 * ({@code VanillaCoreTransformer.java:445-514}), and the macro is this engine's cheaper
+	 * spelling of it: the name is still a macro at the point the header is written, so one
+	 * {@code #undef} and one {@code #define} replace a walk over every read in the body.
+	 * <p>
+	 * Written below the head that defines the two names and above the body that reads them, which
+	 * is the one place the pair can stand and the same place the colour's neutralisation stands.
+	 * The elements are spelled out rather than the macros for the reason that one gives: a macro
+	 * cannot be expanded in the middle of its own redefinition.
+	 * <p>
+	 * The fade is not redirected because it is not a name the pack reads: it is a value the
+	 * fragment spends, and it travels on the varying the decode was made to fill.
+	 */
+	public static List<String> emoteRedirect(ProgramStage stage, VertexInputs inputs) {
+		if (!emotes(stage, inputs)) {
+			return List.of();
+		}
+
+		return List.of(
+				"// WynnVitrail: the pack's own geometry and texture reads see the decoded emote.",
+				"#undef of_Vertex",
+				"#define of_Vertex vec4(" + WynncraftEmote.POSITION_NAME + ", 1.0)",
+				"#undef of_MultiTexCoord0",
+				"#define of_MultiTexCoord0 vec4(" + WynncraftEmote.UV_NAME + ", 0.0, 1.0)");
+	}
+
+	/**
+	 * The decode itself, for the vertex wrapper, ahead of the pack's own body.
+	 * <p>
+	 * <strong>Copies, and the pack's body reads the copies through the redirection above.</strong>
+	 * The decode takes its arguments by reference, so what it is handed it rewrites: the position
+	 * comes back as the limb's real Y and the coordinate as the limb's own region of the skin.
+	 * WynnIris runs the same call on the same pair of globals at the head of its wrapped main
+	 * ({@code EntityPatcher.java:1256-1261}), and the fade is a local here rather than the global
+	 * it keeps because nothing but the varying assignment reads it.
+	 * <p>
+	 * The decode is a branch that returns on the first line for every ordinary vertex, so an
+	 * ordinary mob pays one comparison; the copy of the elements into the globals is two
+	 * assignments, which the wrapper was making anyway in some form.
+	 *
+	 * @return the statements, which run before everything else the wrapper does
+	 */
+	public static String emoteDecode() {
+		return WynncraftEmote.POSITION_NAME + " = " + EntityVertex.POSITION + "; "
+				+ WynncraftEmote.UV_NAME + " = " + EntityVertex.TEX_COORD + "; "
+				+ "float " + WynncraftEmote.FADE_NAME + " = 1.0; "
+				+ WynncraftEmote.APPLY_NAME + "(" + WynncraftEmote.POSITION_NAME + ", "
+				+ WynncraftEmote.UV_NAME + ", " + WynncraftEmote.FADE_NAME + "); ";
+	}
+
+	/**
+	 * The name the decode leaves the coordinate in, for the engine side that carries it.
+	 * <p>
+	 * The carried coordinate is the remapped one rather than the element's own, which is
+	 * WynnIris's choice as well ({@code iris_wynncraft_texcoord}, written from the decoded pair at
+	 * {@code EntityPatcher.java:1262}): a pack that samples the skin reads the limb's own texels
+	 * through the redirection, and the effects have to sample the same ones or a glint would draw
+	 * the head's region over an arm.
+	 */
+	public static String emoteUv() {
+		return WynncraftEmote.UV_NAME;
+	}
+
+	/** The name the decode answers the fade in, for the engine side that carries it. */
+	public static String emoteFade() {
+		return WynncraftEmote.FADE_NAME;
+	}
+
+	/**
 	 * The decode, for the header, and the effect libraries behind it where the effects are on.
 	 * <p>
 	 * <strong>Two groups and not one, because they answer to different switches.</strong> The
@@ -200,6 +296,17 @@ public final class WynncraftPatch {
 		lines.add("// WynnVitrail: the Wynncraft signal decode. See WynncraftSignals.");
 		for (String helper : WynncraftSignals.HELPERS) {
 			lines.addAll(helper.lines().toList());
+		}
+
+		// The vertex stage alone, because the emote is a decode of the mesh rather than an effect
+		// on a colour: its library is the one thing in the patch that names the vertex index,
+		// which no fragment stage has, and its output is a pair of globals and a fade that only
+		// the wrapper and the varying between the two stages read. See WynncraftEmote.
+		if (emotes(stage, inputs)) {
+			lines.add("// WynnVitrail: the player emote decode. See WynncraftEmote.");
+			for (String helper : WynncraftEmote.HELPERS) {
+				lines.addAll(helper.lines().toList());
+			}
 		}
 
 		if (applies(stage, inputs)) {
@@ -262,10 +369,13 @@ public final class WynncraftPatch {
 	 * place from the other direction, its glint walking the pack's AST and rewriting the assignment
 	 * that writes the output, which is the same statement this appends one to.
 	 * <p>
-	 * <strong>Five steps, and the order among them is a result rather than a preference.</strong> It
+	 * <strong>Seven steps, and the order among them is a result rather than a preference.</strong> It
 	 * is WynnIris's own order ({@code EntityPatcher.java:1479-1513}), and every adjacency has a
 	 * reason:
 	 * <ol>
+	 * <li><strong>A limb faded to nothing is thrown away before any of them</strong>
+	 * ({@code EntityPatcher.java:1408}), because everything below it would draw a picture the
+	 * discard then takes off the screen.</li>
 	 * <li><strong>The sky first</strong>, because it replaces the colour rather than adjusting it,
 	 * and everything after it is guarded on the flag it sets. {@link #skybox} carries the whole of
 	 * that argument.</li>
@@ -278,17 +388,26 @@ public final class WynncraftPatch {
 	 * the texture's own alpha - so a reduction applied first would be undone by any of them, where a
 	 * clamp applied second holds whatever the effect left and brings it down only if it is above the
 	 * target.</li>
+	 * <li><strong>The item tint fifth.</strong> A dyed item the game is drawing has its tint in the
+	 * pair the pack reads as the vertex colour and the colour modulator, and a pack that lights its
+	 * own output without one of the two loses the tint where the vanilla shader would have kept it;
+	 * the mix is luma preserving, so a pack that applied the tint itself is re-normalised rather
+	 * than tinted twice.</li>
+	 * <li><strong>The fade sixth.</strong> A translucent limb is faded AND reduced, so the two
+	 * multiply rather than one standing in for the other, and it is guarded on the sky because a
+	 * sky is a colour the drawing chose and not a limb at a distance.</li>
 	 * <li><strong>The self-lit lift last.</strong> It reads the same two things the glint does - the
 	 * decoded number and the texture - and both have to be settled before it can decide whether this
 	 * fragment is a tint, which is the one case it excuses.</li>
 	 * </ol>
 	 * <p>
-	 * <strong>Two of the five carry a guard on the sky and three do not, which is WynnIris's own
-	 * split rather than an oversight.</strong> The unlit correction and the lift are guarded because
-	 * each would otherwise act on a colour the drawing chose and did not produce. The glint and the
-	 * reduction are not, and do not need to be: both read the carried colour, and a skybox mesh
-	 * carries neither an effect number nor a translucency level, so each is already a branch that is
-	 * not taken. Guarding them would be the same picture with two comparisons more.
+	 * <strong>Three of the seven carry a guard on the sky and four do not, which is WynnIris's own
+	 * split rather than an oversight.</strong> The unlit correction, the item tint, the fade and
+	 * the lift are guarded because each would otherwise act on a colour the drawing chose and did
+	 * not produce. The glint and the reduction are not, and do not need to be: both read the
+	 * carried colour, and a skybox mesh carries neither an effect number nor a translucency level,
+	 * so each is already a branch that is not taken. Guarding them would be the same picture with
+	 * two comparisons more.
 	 * <p>
 	 * The alpha is clamped to the target rather than multiplied by it, and the difference is
 	 * WynnIris's own correction rather than a preference: a pack that already carried the reduced
@@ -302,37 +421,76 @@ public final class WynncraftPatch {
 	 * the alpha the reduction would write is one the minimum would not move in any case.
 	 * <p>
 	 * <strong>The two decoded numbers are read once, into locals of this block.</strong> Three of the
-	 * four steps want one of them and the self-lit lift wants both, and a decode repeated is a decode
+	 * six steps want one of them and the self-lit lift wants both, and a decode repeated is a decode
 	 * that can drift. The effect's number is only read where there is a sampler to draw with, so a
 	 * program that has none is left with no local it does not use.
 	 *
 	 * @param output  the name the pack's first colour output ended up with, which is its own where it
 	 *                declared one and this engine's {@code ofFragData0} where it did not
+	 * @param second  the name the pack's second colour output ended up with, or {@code null} where
+	 *                it declared none, which withholds the one step that writes one
+	 * @param vlAlbedo whether the pack's own body names {@code vlAlbedo}, which with the second
+	 *                output is WynnIris's own gate for the suppression and is BSL's spelling of the
+	 *                albedo its later stages light entities out of
 	 * @param sampler the name this program's diffuse atlas is declared under, or {@code null} where
 	 *                it declares none, which withholds everything that samples and keeps the
 	 *                reduction
 	 * @return the statements, or empty where this stage gets no application
 	 */
 	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output,
-			String sampler) {
+			String second, boolean vlAlbedo, String sampler) {
 		if (!applies(stage, inputs)) {
 			return "";
 		}
 
 		String colour = GlslTranslator.ENTITY_VERTEX_COLOR;
+		String fade = GlslTranslator.ENTITY_VERTEX_NEAR_FADE;
 
 		StringBuilder statements = new StringBuilder("{ ");
+
+		// A limb faded to nothing is thrown away before anything else runs, which is WynnIris's own
+		// place for it ({@code EntityPatcher.java:1408}, the first statement of its fragment) and
+		// the one place the ORDER is visible: everything below would draw a picture the discard
+		// then takes off the screen, so it is said once here rather than paid for below.
+		statements.append("if (").append(fade).append(" <= 0.01) { discard; } ");
+
+		// Declared here rather than inside the skybox step, because the fade's multiplication below
+		// guards on it wherever the sky ran and wherever it did not: a program with no diffuse
+		// sampler is refused the sky and still owes the fade, and a second declaration inside the
+		// branch would be one the block already holds.
+		statements.append("bool wynnSkyApplied = false; ");
 		if (sampler != null) {
 			statements.append(skybox(sampler, output));
 		}
 
-		if (sampler != null) {
-			statements.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
-					.append(colour).append("); ");
-		}
-
+		// The two decoded numbers, read whatever became of the sampler: the item tint below asks
+		// whether the number is nought and never samples a texel, so a program that draws no
+		// texture is still told which limb of the question it is on.
+		statements.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
+				.append(colour).append("); ");
 		statements.append("int wynnLevel = ").append(WynncraftSignals.TRANSLUCENCY_NAME).append("(")
 				.append(colour).append("); ");
+
+		// The flags WynnIris reads out of the block entity's own identifier
+		// ({@code EntityPatcher.java:1409-1411}): one or three skip the item tint, two and above
+		// would skip light tweaks this patch has not got. The identifier is unsigned on this mesh
+		// and nought six five five three five where WynnIris reads minus one, and minus one divided
+		// by the radix is nought where six five five three five divided by it is three - so the one
+		// spelling that keeps the two engines answering alike on a draw nothing mapped is the one
+		// that puts the minus one back before it divides.
+		statements.append("int wynnInfoFlags = (blockEntityId == 65535 ? -1 : blockEntityId) / 16384; ");
+		statements.append("bool wynnSkipTint = wynnInfoFlags == 1 || wynnInfoFlags == 3; ");
+
+		// The tint the game asked for, out of the pair a vanilla shader multiplies together and a
+		// pack multiplies only the first of: the vertex colour this engine carries raw, and the
+		// modulator the game's own transforms block holds. How far it is from white, worked out
+		// once here because two of the steps below ask and a formula repeated is one that can
+		// drift between its askers.
+		statements.append("vec3 wynnTintColor = clamp(").append(colour).append(".rgb * ")
+				.append(LegacyGlsl.GAME_COLOR_MODULATOR).append(".rgb, vec3(0.0), vec3(1.0)); ");
+		statements.append("vec3 wynnTintDelta = abs(wynnTintColor - vec3(1.0)); ");
+		statements.append("float wynnTintStrength = clamp(max(max(wynnTintDelta.r, wynnTintDelta.g),")
+				.append(" wynnTintDelta.b) * 4.0, 0.0, 1.0); ");
 
 		if (sampler != null) {
 			// Guarded, because a sky is a colour the drawing chose rather than a shading of one, and
@@ -350,14 +508,105 @@ public final class WynncraftPatch {
 		statements.append("if (wynnLevel > 0) { ").append(output).append(".a = min(").append(output)
 				.append(".a, ").append(WynncraftSignals.ALPHA_NAME).append("(wynnLevel)); } ");
 
+		statements.append(itemTint(output));
+
+		// The fade, spent after the reduction and before the lift, which is WynnIris's own order
+		// ({@code EntityPatcher.java:1494}): a translucent limb is faded AND reduced, so the two
+		// multiply rather than one standing in for the other, and the lift comes last because it
+		// reads the texture and the number both. Guarded on the sky for the reason the two above
+		// it are ({@code WynncraftShading}'s own argument): a sky is a colour the drawing chose,
+		// and fading one by the distance of a box it was never an emote of is a change to it.
+		statements.append("if (!wynnSkyApplied) { ").append(output).append(" *= ").append(fade)
+				.append("; } ");
+
 		if (sampler != null) {
 			statements.append("if (!wynnSkyApplied) ")
 					.append(WynncraftShading.emissive(output, sampler, "wynnEffect"));
 		}
 
+		if (second != null && vlAlbedo) {
+			statements.append(suppressVlAlbedo(second));
+		}
+
 		statements.append("} ");
 
 		return statements.toString();
+	}
+
+	/**
+	 * The tint the game asked of an item it is drawing, put back over the colour the pack lit.
+	 * <p>
+	 * <strong>What it is for is a tint a pack drops rather than one it applies.</strong> The vanilla
+	 * entity shader multiplies two things a pack may multiply one of: the vertex colour and the
+	 * colour modulator, and the game delivers a dyed item's tint through either. A pack that lights
+	 * its own output and multiplies only the vertex colour loses the tint wherever the game chose
+	 * the modulator for it, and this puts the tint back - not as the raw colour but as the HUE of
+	 * the tint at the LUMA the pack's lit output already has, mixed in by how far the tint is from
+	 * white. That shape is what makes it safe on a pack that applied the tint itself: the result it
+	 * moves toward is the tint the pack already drew, and the mix is toward the same picture.
+	 * WynnIris's own words for the same code are at {@code EntityPatcher.java:919-935}.
+	 * <p>
+	 * <strong>Four things hold it back, and three of them are the same branch not being taken.</strong>
+	 * A sky is a colour the drawing chose; the flags say the mapping asked for the tint to stand;
+	 * a signal - an effect number or a translucency level - means the mesh is a Wynncraft effect
+	 * rather than an item with a tint on it; and {@code currentRenderedItemId} nought means the
+	 * draw is not an item the game told the id of at all, which is the gate that keeps a mob or a
+	 * block out of a question about items.
+	 *
+	 * @param output the name the pack's first colour output ended up with
+	 * @return the statements, which run after the reduction and before the fade
+	 */
+	private static String itemTint(String output) {
+		StringBuilder code = new StringBuilder();
+		code.append("if (!wynnSkyApplied && !wynnSkipTint && wynnEffect == 0 && wynnLevel == 0")
+				.append(" && currentRenderedItemId > 0) { ");
+		code.append("if (wynnTintStrength > 0.001) { ");
+		code.append("float wynnTintLuma = dot(wynnTintColor, vec3(0.2126, 0.7152, 0.0722)); ");
+		code.append("float wynnOutLuma = dot(max(").append(output).append(".rgb, vec3(0.0)),")
+				.append(" vec3(0.2126, 0.7152, 0.0722)); ");
+		code.append("if (wynnOutLuma > 0.001) { ");
+		code.append("vec3 wynnTintHue = wynnTintLuma > 0.001 ? wynnTintColor / wynnTintLuma")
+				.append(" : vec3(0.0); ");
+		code.append("vec3 wynnPreservedTint = clamp(wynnTintHue * wynnOutLuma, vec3(0.0),")
+				.append(" vec3(1.0)); ");
+		code.append(output).append(".rgb = mix(").append(output).append(".rgb, wynnPreservedTint,")
+				.append(" wynnTintStrength); } } } ");
+
+		return code.toString();
+	}
+
+	/**
+	 * The second colour output zeroed, for the one pack that lights entities out of it.
+	 * <p>
+	 * <strong>BSL's entity stage is where this lives, and the condition is the pack's own
+	 * spelling.</strong> A BSL entity program that names {@code vlAlbedo} and writes a second
+	 * output is one whose later stages blend a "vanilla light" contribution over entities using
+	 * what that output holds, and a tint - the shader's own, ids fifteen to twenty-four, or the
+	 * item tint above - is a colour that contribution would double-correct. WynnIris zeroes the
+	 * output's colour for exactly those fragments ({@code EntityPatcher.java:936-948}), gated the
+	 * same two ways: the pack must name the identifier, and it must write the second output at
+	 * all.
+	 * <p>
+	 * <strong>Inert on a pack configured as BSL ships, and that is worth saying rather than
+	 * hiding.</strong> The second output of BSL's entity stage exists only under its selective
+	 * TAA or its advanced materials, and under the first of those it holds a mask whose colour is
+	 * nought already; under the second it holds smoothness and sky occlusion, which is what the
+	 * zero takes, exactly as it does under WynnIris. A pack that names neither the identifier nor
+	 * the output is not asked the question at all.
+	 *
+	 * @param second the name the pack's second colour output ended up with
+	 * @return the statements, which run last of everything the application does
+	 */
+	private static String suppressVlAlbedo(String second) {
+		StringBuilder code = new StringBuilder();
+		code.append("if (!wynnSkyApplied) { ");
+		code.append("bool wynnShaderTint = wynnEffect >= 15 && wynnEffect <= 24; ");
+		code.append("bool wynnItemTint = !wynnSkipTint && wynnEffect == 0 && wynnLevel == 0")
+				.append(" && currentRenderedItemId > 0 && wynnTintStrength > 0.001; ");
+		code.append("if (wynnShaderTint || wynnItemTint) { ").append(second)
+				.append(".rgb = vec3(0.0); } } ");
+
+		return code.toString();
 	}
 
 	/**
@@ -412,7 +661,6 @@ public final class WynncraftPatch {
 		// comment: this engine has no second sky for them to keep out of the way.
 		code.append("const int ").append(SKY_PRIMARY).append(" = 0; const int ")
 				.append(SKY_RECENT).append(" = 0; ");
-		code.append("bool wynnSkyApplied = false; ");
 		code.append("int wynnSkyId = ").append(WynncraftSkybox.SIGNAL_NAME).append("(")
 				.append(sampler).append(", ").append(GlslTranslator.ENTITY_VERTEX_UV).append("); ");
 		code.append("if (wynnSkyId > 0) { ");

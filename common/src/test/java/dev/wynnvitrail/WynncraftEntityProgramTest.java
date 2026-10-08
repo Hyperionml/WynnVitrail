@@ -93,30 +93,39 @@ class WynncraftEntityProgramTest {
 			assertTrue(fragment.contains("in vec4 of_VertexColor;"),
 					"the fragment stage cannot see the colour:\n" + fragment);
 
-			// The other two the mesh carries, which the effects read a coordinate off. Both are
-			// asked of the mesh rather than of the pack - a pack's own coordinate is whatever the
-			// pack called it - so both have to be declared on both sides and filled on one.
-			assertTrue(vertex.contains("out vec2 of_VertexUV;"),
-					"the vertex stage does not hand the coordinate on:\n" + vertex);
-			assertTrue(fragment.contains("in vec2 of_VertexUV;"),
-					"the fragment stage cannot see the coordinate:\n" + fragment);
-			assertTrue(vertex.contains("out vec2 of_VertexMidTex;"),
-					"the vertex stage does not hand the middle of the sprite on:\n" + vertex);
-			assertTrue(fragment.contains("in vec2 of_VertexMidTex;"),
-					"the fragment stage cannot see the middle of the sprite:\n" + fragment);
-			assertTrue(vertex.contains("of_VertexUV = UV0;"),
-					"the coordinate is declared and never filled:\n" + vertex);
-			assertTrue(vertex.contains("of_VertexMidTex = MidTexCoord;"),
-					"the sprite's middle is declared and never filled:\n" + vertex);
+		// The other two the mesh carries, which the effects read a coordinate off. Both are
+		// asked of the mesh rather than of the pack - a pack's own coordinate is whatever the
+		// pack called it - so both have to be declared on both sides and filled on one. The fill
+		// is the decoded coordinate rather than the element's own, because the emote decode runs
+		// ahead of it and a limb's glint is drawn over the limb's own region of the skin.
+		assertTrue(vertex.contains("out vec2 of_VertexUV;"),
+				"the vertex stage does not hand the coordinate on:\n" + vertex);
+		assertTrue(fragment.contains("in vec2 of_VertexUV;"),
+				"the fragment stage cannot see the coordinate:\n" + fragment);
+		assertTrue(vertex.contains("out vec2 of_VertexMidTex;"),
+				"the vertex stage does not hand the middle of the sprite on:\n" + vertex);
+		assertTrue(fragment.contains("in vec2 of_VertexMidTex;"),
+				"the fragment stage cannot see the middle of the sprite:\n" + fragment);
+		assertTrue(vertex.contains("of_VertexUV = wynnEmoteUv;"),
+				"the coordinate is declared and never filled:\n" + vertex);
+		assertTrue(vertex.contains("of_VertexMidTex = MidTexCoord;"),
+				"the sprite's middle is declared and never filled:\n" + vertex);
 
-			// The fourth, which only the skies read: a Wynncraft skybox is a box, so the direction
-			// a fragment of it lies in is the direction of the vertex it was built from.
-			assertTrue(vertex.contains("out vec3 of_VertexPosition;"),
-					"the vertex stage does not hand the position on:\n" + vertex);
-			assertTrue(fragment.contains("in vec3 of_VertexPosition;"),
-					"the fragment stage cannot see the position:\n" + fragment);
-			assertTrue(vertex.contains("of_VertexPosition = Position;"),
-					"the position is declared and never filled:\n" + vertex);
+		// The fourth, which only the skies read: a Wynncraft skybox is a box, so the direction
+		// a fragment of it lies in is the direction of the vertex it was built from.
+		assertTrue(vertex.contains("out vec3 of_VertexPosition;"),
+				"the vertex stage does not hand the position on:\n" + vertex);
+		assertTrue(fragment.contains("in vec3 of_VertexPosition;"),
+				"the fragment stage cannot see the position:\n" + fragment);
+		assertTrue(vertex.contains("of_VertexPosition = Position;"),
+				"the position is declared and never filled:\n" + vertex);
+
+		// The fifth, which only the emote writes and only the fragment spends: a computed fade
+		// rather than a carried value, one on a mesh that never held a limb at all.
+		assertTrue(vertex.contains("out float of_VertexNearFade;"),
+				"the vertex stage does not hand the fade on:\n" + vertex);
+		assertTrue(fragment.contains("in float of_VertexNearFade;"),
+				"the fragment stage cannot see the fade:\n" + fragment);
 
 			// The copy that fills it, out of the mesh's own element rather than out of the name the
 			// pack reads: that name has just been redefined to hide the signal, and this varying is
@@ -399,6 +408,160 @@ class WynncraftEntityProgramTest {
 			assertTrue(fragment.lastIndexOf("if (!wynnSkyApplied) {")
 							> fragment.indexOf("if (wynnLevel > 0) { "),
 					"the self-lit lift is not guarded, or not after the reduction:\n" + fragment);
+		});
+	}
+
+	/**
+	 * The player emote, which is the one decode that changes what the pack's own geometry and
+	 * texture reads see rather than what its colour reads do.
+	 * <p>
+	 * Three things are asked of it that a membership check cannot: that the decode runs AHEAD of
+	 * the pack's own main, because the pack draws with what it leaves; that the pack's reads of
+	 * the position and the coordinate are redirected onto the decoded pair, because the mesh
+	 * stores both in their encoded form; and that the fade the fragment spends travels on a
+	 * varying rather than through either of the two names above, because it is a value the mesh
+	 * never held.
+	 */
+	@Test
+	void theEmotePlayerIsDecodedBeforeThePackDrawsIt(@TempDir Path pack) throws IOException {
+		withSwitch(SWITCH, true, () -> {
+			Map<ProgramStage, String> text = translate(pack);
+
+			String vertex = text.get(ProgramStage.VERTEX);
+			String fragment = text.get(ProgramStage.FRAGMENT);
+
+			// The decode and the data it reads, both in the header where the wrapper can reach
+			// them and with the shapes the call is written against.
+			assertTrue(vertex.contains("void wynnApplyPlayer(inout vec3 pos, inout vec2 uv,"
+							+ " out float nearFade) {"),
+					"no emote is decoded:\n" + vertex);
+			assertTrue(vertex.contains("const wynnLimbUv WYNN_EMOTE_LIMB_UVS[8]"),
+					"the limb table is missing:\n" + vertex);
+
+			// The two guards the decode opens with, both the game's own numbers: the threshold
+			// that leaves an ordinary vertex alone, and the identity check that keeps the decode
+			// out of the interface, where the whole transform was put in the pose.
+			assertTrue(vertex.contains("if (pos.y < 2.0 * float(WYNN_EMOTE_Y_RADIX)) return;"),
+					"the decode does not leave an ordinary vertex alone:\n" + vertex);
+			assertTrue(vertex.contains("if (of_GameModelView == mat4(1.0)) return;"),
+					"the decode does not ask the draw's own matrix:\n" + vertex);
+
+			// The vertex index the face and the overlay come off, in the OpenGL spelling the
+			// engine's compiler maps at compile time.
+			assertTrue(vertex.contains("int face = (gl_VertexID % 24) / 4;"),
+					"the face is not read off the vertex index:\n" + vertex);
+
+			// The redirection, which is the whole of what makes the decode visible to the pack:
+			// its own reads of the position and the coordinate are pointed at the decoded pair,
+			// under the macros the head defines and below the head that defines them.
+			assertTrue(vertex.contains("#undef of_Vertex"),
+					"the pack still draws the encoded position:\n" + vertex);
+			assertTrue(vertex.contains("#define of_Vertex vec4(wynnEmotePos, 1.0)"),
+					"the position was undefined and not redirected:\n" + vertex);
+			assertTrue(vertex.contains("#define of_MultiTexCoord0 vec4(wynnEmoteUv, 0.0, 1.0)"),
+					"the pack still samples the head's region of the skin:\n" + vertex);
+
+			// The call, in the wrapper and ahead of the pack's own main: what the pack draws with
+			// is what the decode left, and a call below the body would decode nothing the body had
+			// not already read.
+			assertTrue(vertex.contains("wynnApplyPlayer(wynnEmotePos, wynnEmoteUv, wynnEmoteFade);"),
+					"the decode is written and never called:\n" + vertex);
+			assertTrue(vertex.indexOf("wynnApplyPlayer(wynnEmotePos")
+							< vertex.indexOf("ofPackMain();"),
+					"the decode runs after the pack has drawn:\n" + vertex);
+
+			// The fade on the wire, and the discard and the multiplication that spend it. The
+			// discard is first of everything the application does, because everything below it
+			// would draw a picture it then takes off the screen.
+			assertTrue(vertex.contains("of_VertexNearFade = wynnEmoteFade;"),
+					"the fade is decoded and never carried:\n" + vertex);
+			assertTrue(fragment.contains("if (of_VertexNearFade <= 0.01) { discard; }"),
+					"a limb faded to nothing is not thrown away:\n" + fragment);
+			assertTrue(fragment.contains("if (!wynnSkyApplied) { ofFragData0 *= of_VertexNearFade; }"),
+					"the fade is not multiplied in, or not guarded on the sky:\n" + fragment);
+			assertTrue(fragment.indexOf("if (of_VertexNearFade <= 0.01)")
+							< fragment.indexOf("int wynnSkyId"),
+					"the discard runs after the sky has been drawn:\n" + fragment);
+		});
+	}
+
+	/**
+	 * The item tint and the albedo it is suppressed into, which are the two halves of one question:
+	 * what happens to a tint the game asked for when the pack lights the item without it.
+	 * <p>
+	 * The tint is put back with the hue of the tint at the luma the pack already lit, which is the
+	 * shape that is safe on a pack that applied the tint itself; and the second output is zeroed
+	 * only where the pack wrote one AND named the identifier BSL lights its entities out of, which
+	 * is WynnIris's own gate and is inert on a pack configured as BSL ships.
+	 */
+	@Test
+	void theItemTintIsPutBackAndTheVlAlbedoIsSuppressedWhereItExists(@TempDir Path pack)
+			throws IOException {
+		withSwitch(SWITCH, true, () -> {
+			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
+
+			// The two identifiers the tint asks of the mesh, declared on the fragment side the
+			// patch asked for them rather than the pack: the item's own id, and the block
+			// entity's, whose high bits carry the flags that can ask for the tint to stand.
+			assertTrue(fragment.contains("flat in int currentRenderedItemId;"),
+					"the item's id is not carried:\n" + fragment);
+			assertTrue(fragment.contains("flat in int blockEntityId;"),
+					"the block entity's id is not carried:\n" + fragment);
+
+			// The flags, with the one spelling that keeps the two engines alike: the identifier is
+			// unsigned here and the unmapped value is six five five three five, which divided by
+			// the radix is three where WynnIris's minus one divides to nought.
+			assertTrue(fragment.contains(
+					"int wynnInfoFlags = (blockEntityId == 65535 ? -1 : blockEntityId) / 16384;"),
+					"the flags are not read off the identifier:\n" + fragment);
+
+			// The tint itself: the pair the vanilla shader multiplies together, gated on the draw
+			// being an item the game told the id of, and mixed in by how far the tint is from
+			// white.
+			assertTrue(fragment.contains("vec3 wynnTintColor = clamp(of_VertexColor.rgb"
+							+ " * of_GameColorModulator.rgb, vec3(0.0), vec3(1.0));"),
+					"the tint is not read out of the pair the game asked it through:\n" + fragment);
+			assertTrue(fragment.contains("currentRenderedItemId > 0) {"),
+					"the tint is not gated on the draw being an item:\n" + fragment);
+			assertTrue(fragment.contains(".rgb = mix(ofFragData0.rgb, wynnPreservedTint, "
+							+ "wynnTintStrength);"),
+					"the tint is not mixed in at the luma the pack lit:\n" + fragment);
+
+			// The order: after the reduction, before the fade, which is WynnIris's own.
+			int reduction = fragment.indexOf("if (wynnLevel > 0) {");
+			int tint = fragment.indexOf("currentRenderedItemId > 0) {");
+			int fade = fragment.indexOf("ofFragData0 *= of_VertexNearFade");
+			assertTrue(reduction < tint && tint < fade,
+					"the tint is not between the reduction and the fade:\n" + fragment);
+
+			// And the suppression, which this program has no second output for: the default pack
+			// of these tests writes one colour and names no albedo, so the question is never
+			// asked of it.
+			assertFalse(fragment.contains("wynnShaderTint"),
+					"the albedo was suppressed on a program with no second output:\n" + fragment);
+
+			// The same program with a second output and BSL's own identifier in it: the question
+			// is asked, and the answer is the colour of that output zeroed for a tinted fragment.
+			String two = """
+					#version 120
+
+					uniform sampler2D texture;
+					varying vec4 texcoord;
+
+					void main() {
+					    vec4 c = texture2D(texture, texcoord.st);
+					    vec3 vlAlbedo = c.rgb;
+					    gl_FragData[0] = c;
+					    gl_FragData[1] = vec4(vlAlbedo, 1.0);
+					}
+					""";
+			String suppressed = translate(pack, two).get(ProgramStage.FRAGMENT);
+
+			assertTrue(suppressed.contains(
+							"bool wynnShaderTint = wynnEffect >= 15 && wynnEffect <= 24;"),
+					"the shader's own tints do not suppress the albedo:\n" + suppressed);
+			assertTrue(suppressed.contains(".rgb = vec3(0.0); } } "),
+					"the albedo is not zeroed for a tinted fragment:\n" + suppressed);
 		});
 	}
 
