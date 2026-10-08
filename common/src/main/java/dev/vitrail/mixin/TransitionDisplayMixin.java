@@ -50,9 +50,10 @@ import java.util.Optional;
  * <p>
  * This is the head of {@code submitInner} and not the renderer's own {@code submit}: the state is
  * what carries the text, and it is built by {@code extractRenderState} before this is reached.
- * The other half of WynnIris's injector here - a brightness floor and a dark-scene boost for the
- * letters themselves - is deliberately not taken over, being a general readability effect for
- * every text display rather than a transition.
+ * WynnIris's other injector on this method - a lift of the light the letters are drawn at, for a
+ * scene a Wynncraft sky has darkened - is {@link TextDisplayLightMixin}, a file of its own because
+ * it is a subject of its own: this one reads the entity and stops it being drawn, and that one
+ * changes how brightly what is drawn is lit.
  */
 @Mixin(DisplayRenderer.TextDisplayRenderer.class)
 public abstract class TransitionDisplayMixin {

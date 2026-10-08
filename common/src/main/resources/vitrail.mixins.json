@@ -70,6 +70,7 @@
 		"access.TextureManagerAccessor",
 		"sodium.VKDrawContextMixin",
 		"TextFeatureRendererMixin",
+		"TextDisplayLightMixin",
 		"TextSubmitMixin",
 		"TransitionDisplayMixin",
 		"VulkanBackendMixin",

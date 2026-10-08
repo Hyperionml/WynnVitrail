@@ -119,6 +119,9 @@ public final class WynncraftSky {
 	/** Where night vision is bright enough that WynnIris stops compensating for the dark. */
 	private static final float NIGHT_VISION_SEES = 0.5F;
 
+	/** Where rain is heavy enough that WynnIris stops lifting the letters out of the dark. */
+	private static final float RAIN_VISIBLE = 0.2F;
+
 	/** A frame's step, banded, so that a pause or a hitch cannot jump a fade by seconds. */
 	private static final float MIN_STEP = 0.001F;
 	private static final float MAX_STEP = 0.25F;
@@ -361,6 +364,37 @@ public final class WynncraftSky {
 	/** Whether the standing sky is one of the four whose scene is darkened. */
 	private static boolean isDark() {
 		return id == 3 || id == 4 || id == 5 || id == 7;
+	}
+
+	/**
+	 * How hard the letters of a text display under this sky are lifted towards being readable.
+	 * <p>
+	 * <strong>The same darkening the entity boost answers, and answered differently.</strong> A text
+	 * display is lit by the game rather than by the pack - the two light levels it is drawn at are
+	 * computed where it stands, before any of this exists - so a scene the sky has darkened leaves
+	 * its letters at the brightness of a world that is no longer on screen. What is lifted is those
+	 * two levels, and {@link WynncraftText} carries the arithmetic; this is the question of how far.
+	 * <p>
+	 * <strong>Three of the four conditions are the entity boost's and one is not.</strong> A sky that
+	 * is not one of the dark four has darkened nothing. Rain stops it, which is WynnIris's own gate
+	 * and is not on the entity half: a storm is dark enough on its own, and letters lifted inside one
+	 * read as letters glowing. Night vision does NOT stop it, which is the other way round from the
+	 * entity half and is also WynnIris's: night vision is a filter over the whole screen, and a
+	 * player who has it still has to read a sign the sky darkened.
+	 * <p>
+	 * The strength is the fade itself, clamped, because the two settings WynnIris multiplies in -
+	 * entity brightness and scene darkening - both ship at the hundred out of a hundred that leaves
+	 * it alone, and this fork keeps the settings it carries at the values they ship at.
+	 *
+	 * @param rain how hard it is raining where the camera stands, nought to one
+	 * @return how far the lift is taken, nought to one
+	 */
+	public static float textLightBoost(float rain) {
+		if (!isDark() || rain > RAIN_VISIBLE) {
+			return 0.0F;
+		}
+
+		return Math.min(1.0F, Math.max(0.0F, fade));
 	}
 
 	/** Forgets the identity, the fade and the grace. For a world or dimension change. */

@@ -270,6 +270,36 @@ class WynncraftSkyTest {
 		});
 	}
 
+	/**
+	 * What a text display under a dark sky is owed, and the two cases that are owed nothing.
+	 * <p>
+	 * The rain is the one gate the entity boost has not got, and it is WynnIris's own: a storm is dark
+	 * enough on its own and letters lifted inside one read as letters glowing. It is checked here
+	 * because it is the only input to this rule that does not come off the sky.
+	 * <p>
+	 * Night vision is the other way round and is asserted by the signature rather than by a case:
+	 * there is no argument for it, because WynnIris's text half has no check for it. A player wearing
+	 * a filter over the whole screen still has to read a sign the sky darkened, where the entities
+	 * around them are already lifted by the other rule and would be washed out by a second helping.
+	 */
+	@Test
+	void aDarkSkyLiftsTheLettersOutOfTheDarkUnlessItIsRaining() {
+		withPatch(true, () -> {
+			noteFrames(240, 4);
+
+			assertEquals(1.0F, WynncraftSky.textLightBoost(0.0F), 0.01F,
+					"a dark sky did not lift the letters under it");
+			assertEquals(0.0F, WynncraftSky.textLightBoost(0.5F), 0.0F,
+					"the letters were lifted inside a storm");
+
+			WynncraftSky.reset();
+			noteFrames(240, 1);
+
+			assertEquals(0.0F, WynncraftSky.textLightBoost(0.0F), 0.0F,
+					"a pale sky lifted the letters for a darkening it does not do");
+		});
+	}
+
 	/** One frame's detection of one sky, which is the shape every test above feeds on. */
 	private static void noteFrames(int frames, int skyId) {		for (int frame = 0; frame < frames; frame++) {
 			WynncraftSky.note(skyId, PRIMARY_Y);
