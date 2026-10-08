@@ -69,6 +69,7 @@
 		"sodium.VKDrawContextMixin",
 		"TextFeatureRendererMixin",
 		"TextSubmitMixin",
+		"TransitionDisplayMixin",
 		"VulkanBackendMixin",
 		"access.VulkanCommandEncoderAccessor",
 		"VulkanCommandEncoderMixin",

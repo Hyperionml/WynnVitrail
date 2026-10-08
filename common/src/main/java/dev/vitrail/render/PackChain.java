@@ -312,6 +312,13 @@ public final class PackChain {
 	private final ChainPresent present;
 	private final boolean seedEnabled;
 
+	/**
+	 * The two Wynncraft effects that are painted over the finished picture rather than woven into a
+	 * program: the Mist Woods fog and the transition screens. One per chain, so its swap texture and
+	 * its opacity ramp live and die with the pack that draws it. See {@link WynncraftOverlay}.
+	 */
+	private final WynncraftOverlay wynncraftOverlay;
+
 	/** The game's translucent features, caught and composed onto the pack's image. Null when the
 	 * pack serves no translucent pass to compose in front of. */
 	private final FeatureLayer features;
@@ -423,6 +430,10 @@ public final class PackChain {
 				.filter(where -> this.targets.has(where.target()))
 				.map(ChainPresent::new)
 				.orElse(null);
+		// Nothing of this touches the device either: the swap texture and the two blocks are made by
+		// the first frame that has something to draw, off the constructor's own thread. A chain with
+		// no Wynncraft in it never makes them at all, the flag on the frame being what opens the door.
+		this.wynncraftOverlay = new WynncraftOverlay();
 		// Composed where the world's own translucents are about to blend, so it needs that pass to
 		// exist: a pack serving no translucent geometry gets no layer, and the game's features stay
 		// where the game drew them. A target of integers gets none either, for the seed's reason.
@@ -2405,6 +2416,15 @@ public final class PackChain {
 					this.targets);
 		}
 
+		// The last of the frame and over everything the pack drew: Wynncraft's Mist Woods fog and
+		// its transition screens, which are painted rather than woven into a program. Their own
+		// depths, in the pack's window and not the game's, because the fog rebuilds a distance out
+		// of them against gbufferProjection's inverse. Both are null on a frame that kept neither,
+		// which the pass reads as "no fog this frame" rather than as an error.
+		this.wynncraftOverlay.draw(device.createCommandEncoder(), device, this.quad,
+				ready.mainView(), this.targets.depth().scene(), this.targets.depth().opaque(),
+				this.values.world());
+
 		// Outside any pass, and after the last one. Only the targets the pack keeps between frames
 		// and that the chain left on the far half are copied: the next frame walks from an empty
 		// flipped set and would otherwise be handed what was written two frames ago.
@@ -3278,6 +3298,11 @@ public final class PackChain {
 		if (this.features != null) {
 			this.features.release();
 		}
+
+		// Its swap texture and its two blocks, which the frame before's fog or transition may have
+		// left standing. Released with the chain and not at a world change: both effects belong to
+		// the pack that drew them, and the pack is what this moment is the end of.
+		this.wynncraftOverlay.release();
 
 		// DH takes its far terrain back with the pack, its own frame order included: DhLods.handBack
 		// says why nothing else would ever return it.

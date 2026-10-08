@@ -6,6 +6,7 @@ import dev.vitrail.pack.model.RenderStage;
 import dev.vitrail.pack.target.PackDirectives;
 import dev.vitrail.render.timing.PassTimings;
 import dev.vitrail.uniform.ClipSpace;
+import dev.wynnvitrail.WynncraftMist;
 import dev.vitrail.uniform.values.FrameSmoothed;
 import dev.vitrail.uniform.WorldState;
 
@@ -379,6 +380,12 @@ public final class FrameState implements WorldState {
 		readBiome(minecraft, level);
 		readEngine(minecraft);
 		advanceView(minecraft, cameraState);
+
+		// The Mist Woods, noted here because this is the walk that already holds the camera and the
+		// level the probe is made on, and read back by the pass that fogs the finished picture.
+		// WynnIris notes it in its own fog mixin, at the one moment of the frame the same three
+		// things are in hand ({@code MixinFogRenderer.java:181-203}).
+		WynncraftMist.note(level, camera, this.partialTick);
 
 		// Cleared last, so that a frame in which nothing captured falls back rather than
 		// publishing the frame before it. The bob goes with it and for the same reason: a frame
