@@ -702,6 +702,8 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 				.append(EntityVertex.TEX_COORD).append("; ");
 		assignments.append(GlslTranslator.ENTITY_VERTEX_MID_TEX).append(" = ")
 				.append(EntityVertex.MID_TEX_COORD).append("; ");
+		assignments.append(GlslTranslator.ENTITY_VERTEX_POSITION).append(" = ")
+				.append(EntityVertex.POSITION).append("; ");
 
 		return assignments.toString();
 	}

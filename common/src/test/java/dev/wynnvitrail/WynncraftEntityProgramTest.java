@@ -109,6 +109,15 @@ class WynncraftEntityProgramTest {
 			assertTrue(vertex.contains("of_VertexMidTex = MidTexCoord;"),
 					"the sprite's middle is declared and never filled:\n" + vertex);
 
+			// The fourth, which only the skies read: a Wynncraft skybox is a box, so the direction
+			// a fragment of it lies in is the direction of the vertex it was built from.
+			assertTrue(vertex.contains("out vec3 of_VertexPosition;"),
+					"the vertex stage does not hand the position on:\n" + vertex);
+			assertTrue(fragment.contains("in vec3 of_VertexPosition;"),
+					"the fragment stage cannot see the position:\n" + fragment);
+			assertTrue(vertex.contains("of_VertexPosition = Position;"),
+					"the position is declared and never filled:\n" + vertex);
+
 			// The copy that fills it, out of the mesh's own element rather than out of the name the
 			// pack reads: that name has just been redefined to hide the signal, and this varying is
 			// the only place it survives.
@@ -304,13 +313,96 @@ class WynncraftEntityProgramTest {
 	}
 
 	/**
+	 * The sky, which is the one application that replaces the colour rather than adjusting it.
+	 * <p>
+	 * Two things are asked of it that a still reading of the text cannot answer on its own, and both
+	 * are about order. The skies' own noise is the glint library's, so that library has to have been
+	 * written first or the header names a callee nothing declared; and the application has to run
+	 * before the four steps that adjust the colour, because those would otherwise adjust a colour
+	 * that is about to be discarded.
+	 */
+	@Test
+	void theSkyReplacesTheColourBeforeAnythingAdjustsIt(@TempDir Path pack) throws IOException {
+		withSwitch(SWITCH, true, () -> {
+			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
+
+			// The decode and the dispatch, with the shapes the caller is written against.
+			assertTrue(fragment.contains("int wynnSkyboxSignal(sampler2D tex, vec2 uv) {"),
+					"no sky identity is read:\n" + fragment);
+			assertTrue(fragment.contains("vec4 wynnSkyApply(int id, float time, vec3 direction) {"),
+					"no sky is drawn:\n" + fragment);
+
+			// That the seven skies are all there, by one function of each shape they come in: the
+			// lattice, a rotation, the crystalline field, the bolt and its envelope.
+			for (String sky : new String[] {"float wynnSkyFbm(vec2 p) {", "float wynnSkyFbm(vec3 p) {",
+					"vec3 wynnSkyRotateAxis(vec3 v, vec3 axis, float angle) {",
+					"float wynnSkyCrystalNoise(vec3 position, float time) {",
+					"float wynnSkyLightningBolt(vec2 uv, vec2 start, vec2 end, float seed, float width) {",
+					"float wynnSkyLightningFlash(float time, float seed) {",
+					"float wynnSkyDistantCloudFlash(float time, float seed) {"}) {
+				assertTrue(fragment.contains(sky), "a sky is missing: " + sky + "\n" + fragment);
+			}
+
+			// The dependency, which is an adjacency and not a membership: the skies interpolate a
+			// lattice the glint library declares, and a header holding one without the other does
+			// not compile at all.
+			assertTrue(fragment.indexOf("float wynnSmoothNoise(vec2 p) {")
+							< fragment.indexOf("float wynnSkyFbm(vec2 p) {"),
+					"the skies are written above the noise they are built on:\n" + fragment);
+
+			// The call itself: the program's own sampler, the mesh's own coordinate, and the two
+			// ids at the value that means the CPU side has filled neither. The ids being nought is
+			// WynnIris's own "no primary detected", so the discard below cannot fire - and it is
+			// asserted in that state rather than skipped, because the day the CPU side lands the
+			// constants become uniforms and this is the line that has to change.
+			assertTrue(fragment.contains("int wynnSkyId = wynnSkyboxSignal(ofTexture, of_VertexUV);"),
+					"the sky is decoded and never asked for:\n" + fragment);
+			assertTrue(fragment.contains("const int wynnSkyPrimaryId = 0;"),
+					"the primary sky id is not the constant this port has:\n" + fragment);
+			assertTrue(fragment.contains("if (wynnSkyId == wynnSkyPrimaryId"
+							+ " || wynnSkyId == wynnSkyRecentId) { discard; }"),
+					"a sky drawn twice would be drawn twice:\n" + fragment);
+
+			// The time, in the shape WynnIris writes it and against this engine's own day clock: the
+			// day is a fraction there and ticks here, so it is divided back out before being taken
+			// up to the pack's twelve thousand.
+			assertTrue(fragment.contains("fract(float(worldTime) / 24000.0) * 12000.0"),
+					"the sky is drawn at the wrong hour:\n" + fragment);
+
+			// The direction, off the mesh's own position, which is the one thing a box-shaped sky
+			// needs that a dome would not.
+			assertTrue(fragment.contains("= wynnSkyApply(wynnSkyId, wynnSkyTime, "
+							+ "normalize(of_VertexPosition));"),
+					"the sky is drawn from somewhere other than the vertex it lies on:\n" + fragment);
+
+			// The three adjacencies, which are the whole of the reason the sky runs first.
+			int sky = fragment.indexOf("wynnSkyApply(wynnSkyId,");
+			int unlit = fragment.indexOf("wynnIsShadeless(wynnShadingTexel)");
+			int glint = fragment.indexOf("= wynnApplyGlint(ofTexture,");
+			int lift = fragment.indexOf("wynnEntityEmissivity)");
+			assertTrue(sky < unlit && unlit < glint && glint < lift,
+					"the application is not in WynnIris's order:\n" + fragment);
+
+			// And the guard that keeps the two corrections off a colour the drawing chose. Asked
+			// twice, because the two are guarded separately and one of them guarded alone is a sky
+			// divided by the light the pack had baked in. The brace after the guard is the
+			// correction's own block, which is why there is only one of them.
+			assertTrue(fragment.contains("if (!wynnSkyApplied) { vec4 wynnShadingTexel"),
+					"the unlit correction would act on a sky:\n" + fragment);
+			assertTrue(fragment.lastIndexOf("if (!wynnSkyApplied) {")
+							> fragment.indexOf("if (wynnLevel > 0) { "),
+					"the self-lit lift is not guarded, or not after the reduction:\n" + fragment);
+		});
+	}
+
+	/**
 	 * A program that declares no diffuse texture.
 	 * <p>
-	 * Neither the glint nor either of the shading corrections has anything to read there - all three
-	 * sample the item's own sprite, and the glint reads the texture's size to know whether it is
-	 * looking at an atlas - so all three are withheld. What is NOT withheld is the reduction, which
-	 * reads the carried colour alone, and that is the point of the split: a program that cannot take
-	 * one half of the patch still gets the other rather than losing both.
+	 * None of what samples the item's own sprite has anything to read there - the glint, the sky,
+	 * and both shading corrections all sample that texel, and the glint reads the texture's size to
+	 * know whether it is looking at an atlas - so all of them are withheld. What is NOT withheld is
+	 * the reduction, which reads the carried colour alone, and that is the point of the split: a
+	 * program that cannot take one half of the patch still gets the other rather than losing both.
 	 */
 	@Test
 	void aProgramWithNoDiffuseTextureStillGetsTheReduction(@TempDir Path pack) throws IOException {
@@ -334,6 +426,10 @@ class WynncraftEntityProgramTest {
 			// calls are the assignments, and they are the ones that must not be there.
 			assertFalse(text.contains("= wynnApplyGlint("),
 					"the glint was called on a program with no sprite to draw over:\n" + text);
+			// The sky is withheld for the same reason and not by accident: it is decoded out of the
+			// same texel, so a program with no sampler has nothing to decode and nothing to draw.
+			assertFalse(text.contains("= wynnSkyApply("),
+					"a sky was drawn on a program with no texel to read it from:\n" + text);
 			assertFalse(text.contains("wynnIsShadeless(wynnShadingTexel)"),
 					"an unlit texture was looked for on a program with none:\n" + text);
 			assertFalse(text.contains("wynnIsEmissive(wynnShadingTexel)"),

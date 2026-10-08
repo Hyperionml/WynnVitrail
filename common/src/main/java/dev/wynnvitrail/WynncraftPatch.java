@@ -74,6 +74,35 @@ public final class WynncraftPatch {
 	 */
 	private static final String DAY_CLOCK_SCALE = "0.0125";
 
+	/** The ticks in a Minecraft day, which is what turns the day clock back into a fraction of one. */
+	private static final String DAY_TICKS = "24000.0";
+
+	/**
+	 * Twelve thousand units of sky time per day, which is the resource pack's own number and half
+	 * of the glint's three hundred over the same day.
+	 * <p>
+	 * Kept as a second scale rather than folded into {@link #DAY_CLOCK_SCALE} because the two are
+	 * the pack's numbers and not this engine's, and a reader comparing the skies against the glint
+	 * has to be able to see that they are the numbers they are. WynnIris works its skies out of
+	 * {@code fract(GameTime) * 12000.0} ({@code EntityPatcher.java:156}), and a day is a fraction
+	 * there where it is ticks here, so the expression below divides the day back out before taking
+	 * it up.
+	 */
+	private static final String SKY_TIME_UNITS = "12000.0";
+
+	/**
+	 * The sky the engine has decided is the current one, and the one it recently faded from.
+	 * <p>
+	 * Both stand at nought, which is WynnIris's own value for having decided on neither, because the
+	 * CPU half that decides in WynnIris serves a sky that engine paints a second time. This engine
+	 * paints only one, so the noughts cost nothing here; {@link WynncraftSkybox} carries the whole
+	 * argument.
+	 */
+	static final String SKY_PRIMARY = "wynnSkyPrimaryId";
+
+	/** @see #SKY_PRIMARY */
+	static final String SKY_RECENT = "wynnSkyRecentId";
+
 	private WynncraftPatch() {
 	}
 
@@ -148,12 +177,14 @@ public final class WynncraftPatch {
 	 * the effects off keeps the decode - which is what the offline test reads back - and carries none
 	 * of the effects' text.
 	 * <p>
-	 * <strong>Two effect libraries rather than one, because the two signal families are read at
-	 * different moments.</strong> The glint and the translucency level come off the carried colour,
-	 * and {@link WynncraftGlint} is the nineteen effects they select; the unlit and self-lit markers
-	 * come off a texel, and {@link WynncraftShading} is the two corrections those call for. Both are
-	 * written on the one condition, that the program is given an application, and both stand above
-	 * the wrapper that calls them.
+	 * <strong>Three effect libraries rather than one, because the three signal families are read
+	 * at different moments and one of them is built on another.</strong> The glint and the
+	 * translucency level come off the carried colour, and {@link WynncraftGlint} is the nineteen
+	 * effects they select; the skies are marked in a texel too but are their own dispatch and are
+	 * built on the glint library's noise, so {@link WynncraftSkybox}'s are written after them; the
+	 * unlit and self-lit markers come off a texel as well, and {@link WynncraftShading} is the two
+	 * corrections those call for. All three are written on the one condition, that the program is
+	 * given an application, and all three stand above the wrapper that calls them.
 	 * <p>
 	 * They are written even where {@link #epilogue} ends up withholding the calls, which happens on
 	 * a program declaring no diffuse sampler: an unused function is a few hundred lines the compiler
@@ -174,6 +205,13 @@ public final class WynncraftPatch {
 		if (applies(stage, inputs)) {
 			lines.add("// WynnVitrail: the Wynncraft glint effects. See WynncraftGlint.");
 			for (String helper : WynncraftGlint.HELPERS) {
+				lines.addAll(helper.lines().toList());
+			}
+			// After the glint's and not merely beside them: the skies are built on the lattice the
+			// glint library declares, so a header holding one and not the other names a callee
+			// nothing wrote. See WynncraftSkybox.
+			lines.add("// WynnVitrail: the Wynncraft skies. See WynncraftSkybox.");
+			for (String helper : WynncraftSkybox.HELPERS) {
 				lines.addAll(helper.lines().toList());
 			}
 			lines.add("// WynnVitrail: what a texture's alpha says. See WynncraftShading.");
@@ -224,23 +262,33 @@ public final class WynncraftPatch {
 	 * place from the other direction, its glint walking the pack's AST and rewriting the assignment
 	 * that writes the output, which is the same statement this appends one to.
 	 * <p>
-	 * <strong>Four steps, and the order among them is a result rather than a preference.</strong> It
-	 * is WynnIris's own order ({@code EntityPatcher.java:1484-1513}), and each of the three
-	 * adjacencies has a reason:
+	 * <strong>Five steps, and the order among them is a result rather than a preference.</strong> It
+	 * is WynnIris's own order ({@code EntityPatcher.java:1479-1513}), and every adjacency has a
+	 * reason:
 	 * <ol>
-	 * <li><strong>The unlit correction first</strong>, before anything rewrites the colour. It reads
-	 * the shading out of the colour by division, so it has to see the colour the pack produced: run
-	 * after a glint it would be dividing a pixel the effect had rebuilt out of the texture, and
-	 * dividing an effect's own output by a light is not what "painted unlit" meant.</li>
-	 * <li><strong>The glint second and the reduction third.</strong> Seven of the effects rebuild the
-	 * whole pixel, alpha included, out of the texture they read - a shine and a tint both end at the
-	 * texture's own alpha - so a reduction applied first would be undone by any of them, where a
+	 * <li><strong>The sky first</strong>, because it replaces the colour rather than adjusting it,
+	 * and everything after it is guarded on the flag it sets. {@link #skybox} carries the whole of
+	 * that argument.</li>
+	 * <li><strong>The unlit correction next</strong>, before anything else rewrites the colour. It
+	 * reads the shading out of the colour by division, so it has to see the colour the pack
+	 * produced: run after a glint it would be dividing a pixel the effect had rebuilt out of the
+	 * texture, and dividing an effect's own output by a light is not what "painted unlit" meant.</li>
+	 * <li><strong>The glint third and the reduction fourth.</strong> Seven of the effects rebuild
+	 * the whole pixel, alpha included, out of the texture they read - a shine and a tint both end at
+	 * the texture's own alpha - so a reduction applied first would be undone by any of them, where a
 	 * clamp applied second holds whatever the effect left and brings it down only if it is above the
 	 * target.</li>
 	 * <li><strong>The self-lit lift last.</strong> It reads the same two things the glint does - the
 	 * decoded number and the texture - and both have to be settled before it can decide whether this
 	 * fragment is a tint, which is the one case it excuses.</li>
 	 * </ol>
+	 * <p>
+	 * <strong>Two of the five carry a guard on the sky and three do not, which is WynnIris's own
+	 * split rather than an oversight.</strong> The unlit correction and the lift are guarded because
+	 * each would otherwise act on a colour the drawing chose and did not produce. The glint and the
+	 * reduction are not, and do not need to be: both read the carried colour, and a skybox mesh
+	 * carries neither an effect number nor a translucency level, so each is already a branch that is
+	 * not taken. Guarding them would be the same picture with two comparisons more.
 	 * <p>
 	 * The alpha is clamped to the target rather than multiplied by it, and the difference is
 	 * WynnIris's own correction rather than a preference: a pack that already carried the reduced
@@ -275,6 +323,10 @@ public final class WynncraftPatch {
 
 		StringBuilder statements = new StringBuilder("{ ");
 		if (sampler != null) {
+			statements.append(skybox(sampler, output));
+		}
+
+		if (sampler != null) {
 			statements.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
 					.append(colour).append("); ");
 		}
@@ -283,7 +335,15 @@ public final class WynncraftPatch {
 				.append(colour).append("); ");
 
 		if (sampler != null) {
-			statements.append(WynncraftShading.shadeless(output, sampler));
+			// Guarded, because a sky is a colour the drawing chose rather than a shading of one, and
+			// dividing a light back out of it would take the sky's own brightness off. WynnIris
+			// guards it and the self-lit lift the same way and for the same reason
+			// ({@code EntityPatcher.java:1001}, {@code :1497}).
+			//
+			// The braces are the helpers' own: both of {@link WynncraftShading}'s write a block, so
+			// the guard is a statement with one body rather than a second pair around the first.
+			statements.append("if (!wynnSkyApplied) ")
+					.append(WynncraftShading.shadeless(output, sampler));
 			statements.append(glint(sampler, output));
 		}
 
@@ -291,12 +351,81 @@ public final class WynncraftPatch {
 				.append(".a, ").append(WynncraftSignals.ALPHA_NAME).append("(wynnLevel)); } ");
 
 		if (sampler != null) {
-			statements.append(WynncraftShading.emissive(output, sampler, "wynnEffect"));
+			statements.append("if (!wynnSkyApplied) ")
+					.append(WynncraftShading.emissive(output, sampler, "wynnEffect"));
 		}
 
 		statements.append("} ");
 
 		return statements.toString();
+	}
+
+	/**
+	 * The sky a fragment belongs to, drawn in place of the box Wynncraft put it on.
+	 * <p>
+	 * <strong>First of everything, because a sky is not a correction to the pack's colour but a
+	 * replacement of it.</strong> Wynncraft has no sky the game knows about: it wraps the player in
+	 * a very large box, paints the faces with the drawing a sky is made of, and marks them, and a
+	 * pack reads that box as geometry and shades it - a lit, fogged, shadowed cube where the sky
+	 * should be. Everything below this point adjusts the colour a pack produced, and there is no
+	 * sense in adjusting a colour that is about to be thrown away, so the drawing runs first and
+	 * everything that reads the colour is guarded on the flag it sets.
+	 * <p>
+	 * <strong>The flag is what makes the guard possible, and it is not the same thing as the
+	 * identity being nought.</strong> The two would agree here, since a sky of identity nought does
+	 * not exist and the flag is set exactly where the identity is not nought - but the reduction
+	 * below is deliberately unguarded, because it reads the carried colour and a skybox mesh
+	 * carries no translucency level, so it is already a nought branch. That is the shape WynnIris
+	 * has as well and the reason its comment gives: the glint and the reduction skip of their own
+	 * accord, and the two steps that would not have been given the flag.
+	 * <p>
+	 * <strong>Two of the four things the drawing is told are constants, and they are the noughts
+	 * that leave its one branch never taken.</strong> WynnIris compares the identity against
+	 * {@code iris_wynncraftPrimarySkyboxId} and {@code iris_wynncraftRecentSkyboxId} and discards on
+	 * a match, which is how a dome is kept out of the way of a sky the pipeline is painting over the
+	 * same pixels - in world space, across the whole screen, over terrain as well. This engine paints
+	 * no such second sky: the fragment this runs in is the only one there is, so a discard here
+	 * would not suppress a duplicate, it would take the sky away and leave the clear colour. Both
+	 * stand at WynnIris's own "nothing decided" value, matching no identity a signal carries, so the
+	 * branch is never taken and the box is replaced rather than hidden. {@link WynncraftSkybox}
+	 * carries the CPU half and the whole of the argument.
+	 * <p>
+	 * <strong>The premultiplied form of the same drawing is left out, and it is the engine's
+	 * business rather than this patch's.</strong> WynnIris has two spellings of the replacement and
+	 * picks between them on whether the pack's output looks premultiplied, which it decides by
+	 * reading the pack's own source: an output it found by scanning a {@code layout} declaration is
+	 * assumed to be blended one-to-one
+	 * ({@code EntityPatcher.java:2079-2088}, {@code :2146}). This engine does not infer that from a
+	 * program, and does not need to: the composition is the pipeline's state and is known where the
+	 * draw is recorded rather than where the text is translated. A sky here is therefore written in
+	 * the straight form, and a pack that premultiplies its translation units would carry a sky that
+	 * is brighter than it should be by its own alpha.
+	 *
+	 * @param sampler the name this program's diffuse atlas is declared under
+	 * @param output  the name the pack's first colour output ended up with
+	 * @return the statements, which run before every other step of the application
+	 */
+	private static String skybox(String sampler, String output) {
+		StringBuilder code = new StringBuilder();
+
+		// The two ids, at WynnIris's own value for having decided on neither. See the method
+		// comment: this engine has no second sky for them to keep out of the way.
+		code.append("const int ").append(SKY_PRIMARY).append(" = 0; const int ")
+				.append(SKY_RECENT).append(" = 0; ");
+		code.append("bool wynnSkyApplied = false; ");
+		code.append("int wynnSkyId = ").append(WynncraftSkybox.SIGNAL_NAME).append("(")
+				.append(sampler).append(", ").append(GlslTranslator.ENTITY_VERTEX_UV).append("); ");
+		code.append("if (wynnSkyId > 0) { ");
+		code.append("if (wynnSkyId == ").append(SKY_PRIMARY).append(" || wynnSkyId == ")
+				.append(SKY_RECENT).append(") { discard; } ");
+		code.append("float wynnSkyTime = fract(float(").append(DAY_CLOCK).append(") / ")
+				.append(DAY_TICKS).append(") * ").append(SKY_TIME_UNITS).append("; ");
+		code.append(output).append(" = ").append(WynncraftSkybox.APPLY_NAME)
+				.append("(wynnSkyId, wynnSkyTime, normalize(")
+				.append(GlslTranslator.ENTITY_VERTEX_POSITION).append(")); ");
+		code.append("wynnSkyApplied = true; } ");
+
+		return code.toString();
 	}
 
 	/**

@@ -236,6 +236,22 @@ public final class GlslTranslator {
 	public static final String ENTITY_VERTEX_MID_TEX = "of_VertexMidTex";
 
 	/**
+	 * The vertex's own position, carried beside the three above and read by one effect only.
+	 * <p>
+	 * <strong>A skybox is a box rather than a dome, and that is the whole of what this is for.</strong>
+	 * Wynncraft puts a very large box around the player and marks its faces with the identity of the
+	 * sky to draw, so the direction a fragment of it lies in is the direction of the vertex it was
+	 * built from - {@code normalize} of the model-space position, which is what WynnCraft's own
+	 * resource pack does and what WynnIris hands its sky selection
+	 * ({@code EntityPatcher.java:157}, written at {@code :1257} from {@code iris_Position}).
+	 * <p>
+	 * The model's space and not the world's: the patch has no means of reaching the camera, and
+	 * needs none, because the box is drawn around the player and its own coordinates are already
+	 * the ones the sky is measured in.
+	 */
+	public static final String ENTITY_VERTEX_POSITION = "of_VertexPosition";
+
+	/**
 	 * The values this engine carries from the entity mesh to the fragment stage for the Wynncraft
 	 * patch, each with the type both stages declare it under.
 	 * <p>
@@ -245,13 +261,14 @@ public final class GlslTranslator {
 	 * declares them on both - and a name added to one and not the others is a stage that compiles
 	 * and draws nothing, or does not compile at all.
 	 * <p>
-	 * The types are here rather than derived because the two differ and nothing about a name says
-	 * which: the colour is four components and the coordinates are two.
+	 * The types are here rather than derived because the four differ and nothing about a name says
+	 * which: the colour is four components, the position three and the two coordinates two.
 	 */
 	static final List<Carry> ENTITY_CARRY = List.of(
 			new Carry(ENTITY_VERTEX_COLOR, "vec4"),
 			new Carry(ENTITY_VERTEX_UV, "vec2"),
-			new Carry(ENTITY_VERTEX_MID_TEX, "vec2"));
+			new Carry(ENTITY_VERTEX_MID_TEX, "vec2"),
+			new Carry(ENTITY_VERTEX_POSITION, "vec3"));
 
 	/** One of {@link #ENTITY_CARRY}: a varying's name and the type both stages declare it under. */
 	record Carry(String name, String type) {

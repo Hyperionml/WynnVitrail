@@ -132,11 +132,22 @@ public final class EntityVertex {
 	public static final String TEX_COORD = "UV0";
 
 	/**
+	 * The element of the mesh that carries the vertex's own position, in the model's space.
+	 * <p>
+	 * Named here beside {@link #COLOUR} and {@link #TEX_COORD} for the same reason, and it is the
+	 * third thing the patch copies forward: a Wynncraft skybox is a box rather than a dome, so the
+	 * direction a fragment of it lies in is the direction of the vertex it was built from, and the
+	 * patch has no other name for it - a pack reads the fixed function {@code gl_Vertex} through a
+	 * macro of its own choosing and an attribute is not reachable by the name a pack gave it.
+	 */
+	public static final String POSITION = "Position";
+
+	/**
 	 * The elements of the entity mesh, in the format's own order, the six the game lays out and the
 	 * three this engine appends after them. {@code EntityMesh} is what appends them.
 	 */
 	public static final List<String> ATTRIBUTES = Stream.concat(
-			Stream.of("Position", COLOUR, TEX_COORD, "UV1", "UV2", "Normal"), APPENDED.stream())
+			Stream.of(POSITION, COLOUR, TEX_COORD, "UV1", "UV2", "Normal"), APPENDED.stream())
 			.toList();
 
 	/**
