@@ -12,6 +12,7 @@ import dev.vitrail.uniform.values.ShadowMatrixValues;
 import dev.vitrail.uniform.values.TimeValues;
 import dev.vitrail.uniform.values.WeatherValues;
 import dev.vitrail.uniform.values.WorldValues;
+import dev.wynnvitrail.WynncraftUniforms;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -72,6 +73,7 @@ public final class UniformCatalog {
 				WeatherValues.register(builder);
 				WorldValues.register(builder);
 				PlayerValues.register(builder);
+				WynncraftUniforms.register(builder);
 				coreMatrices(builder);
 				engine = builder.build();
 			}

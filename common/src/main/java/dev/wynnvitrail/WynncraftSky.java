@@ -107,6 +107,18 @@ public final class WynncraftSky {
 	/** Below this a fade is over rather than small, and the identity goes with it. */
 	private static final float FADE_DONE = 0.005F;
 
+	/**
+	 * How much brighter an entity is drawn at full strength under one of the dark skies.
+	 * <p>
+	 * WynnIris's own half, which its entity brightness and scene darkening sliders scale and which
+	 * this fork has no sliders for: both ship at the hundred out of a hundred that leaves this
+	 * number alone, so the two factors are not carried.
+	 */
+	private static final float BOOST_AT_FULL_STRENGTH = 0.5F;
+
+	/** Where night vision is bright enough that WynnIris stops compensating for the dark. */
+	private static final float NIGHT_VISION_SEES = 0.5F;
+
 	/** A frame's step, banded, so that a pause or a hitch cannot jump a fade by seconds. */
 	private static final float MIN_STEP = 0.001F;
 	private static final float MAX_STEP = 0.25F;
@@ -296,6 +308,59 @@ public final class WynncraftSky {
 	/** The identity just left, kept out of the detection while its grace runs. */
 	public static int recentId() {
 		return recentId;
+	}
+
+	/**
+	 * How much brighter an entity under this sky is drawn, which is one wherever it is not.
+	 * <p>
+	 * <strong>It is compensation and not decoration.</strong> A dark sky darkens the scene it hangs
+	 * over - that is what {@link #fade} is spent on by the pass that tints it - and an entity is part
+	 * of that scene: a mob in a storm over Wynncraft's War Surface is darkened along with the ground
+	 * it stands on, and at night the two of them close on black. The boost lifts the entities back
+	 * towards what they were, so that a fight in a storm is a fight a player can read. WynnIris
+	 * computes the same number for the same reason ({@code uniforms/CommonUniforms.java:86-107}) and
+	 * its shape is kept: half again at full strength, scaled by the fade so that it arrives and
+	 * leaves with the sky, and scaled by two sliders this fork does not have and therefore reads at
+	 * the hundred out of a hundred they ship at.
+	 * <p>
+	 * <strong>Three things answer one, and each is a case a reader would otherwise have to guess
+	 * at.</strong>
+	 * <ul>
+	 * <li><strong>The sky is not one of the dark four.</strong> Two of the seven are a pale mist and
+	 * one is a bright day; a scene under those is not darkened, so there is nothing to compensate
+	 * for.</li>
+	 * <li><strong>The player can already see in the dark.</strong> A boost on top of night vision is
+	 * a scene washed out rather than read, and WynnIris's own setting for it ships on.</li>
+	 * <li><strong>The piece being drawn is the player's own hand.</strong> WynnIris withholds its
+	 * light tweaks from a hand program whole ({@code EntityPatcher.java:1446}), and the reason is
+	 * that the hand is not in the world the sky is over: it is held in front of the camera and lit
+	 * by the game rather than by the region, and a hand that brightened with the weather would be
+	 * the one thing on screen that did.</li>
+	 * </ul>
+	 * <p>
+	 * <strong>The hand is answered here rather than by withholding the step from its program</strong>,
+	 * which is where WynnIris answers it and is the one place this port departs from it. Withholding
+	 * a step from a program is a decision about the text of a translation, and that text is cached
+	 * under a key which would then have to carry the decision as well; answering a number here is a
+	 * value the runtime writes, and a program ever drawn both as a hand and as a body is answered for
+	 * the draw it is in rather than for the file it came from. What it costs is one multiply by one
+	 * on the hand.
+	 *
+	 * @param nightVision how far into night vision the player is, nought to one
+	 * @param hand        whether the pass being drawn is the player's own hand
+	 * @return the multiplier an entity's colour is taken up by
+	 */
+	public static float entityBoost(float nightVision, boolean hand) {
+		if (hand || !isDark() || nightVision > NIGHT_VISION_SEES) {
+			return 1.0F;
+		}
+
+		return 1.0F + BOOST_AT_FULL_STRENGTH * fade;
+	}
+
+	/** Whether the standing sky is one of the four whose scene is darkened. */
+	private static boolean isDark() {
+		return id == 3 || id == 4 || id == 5 || id == 7;
 	}
 
 	/** Forgets the identity, the fade and the grace. For a world or dimension change. */

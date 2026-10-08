@@ -226,9 +226,52 @@ class WynncraftSkyTest {
 		});
 	}
 
+	/**
+	 * The compensation a dark sky owes the entities under it, and the three cases that owe one.
+	 * <p>
+	 * Read as a number rather than as a picture for the reason the rest of this file is: half again
+	 * at full strength, arriving and leaving with the fade, is a value that a photograph of a storm
+	 * cannot be asked about - what a photograph shows is a scene somebody has already judged, and
+	 * the judgement is the number.
+	 */
+	@Test
+	void aDarkSkyCompensatesItsEntitiesAndAPaleOneDoesNot() {
+		withPatch(true, () -> {
+			noteFrames(240, 4);
+
+			assertEquals(1.5F, WynncraftSky.entityBoost(0.0F, false), 0.01F,
+					"a dark sky at full strength does not lift its entities by the half WynnIris uses");
+			assertEquals(1.0F, WynncraftSky.entityBoost(1.0F, false), 0.0F,
+					"night vision was compensated for on top of itself");
+
+			WynncraftSky.reset();
+			noteFrames(240, 1);
+
+			assertEquals(1.0F, WynncraftSky.entityBoost(0.0F, false), 0.0F,
+					"a pale sky compensated for a darkening it does not do");
+		});
+	}
+
+	/**
+	 * And the hand, which is the one piece on screen that is not in the world the sky is over.
+	 * <p>
+	 * WynnIris answers this by withholding the whole light-tweak step from a hand program
+	 * ({@code EntityPatcher.java:1446}); this port answers it as the value is written, so what is
+	 * checked here is the rule and not a translation. A hand that brightened with the weather would
+	 * be the one thing on screen that did.
+	 */
+	@Test
+	void theHandIsNeverCompensatedForTheSkyItIsHeldUnder() {
+		withPatch(true, () -> {
+			noteFrames(240, 4);
+
+			assertEquals(1.0F, WynncraftSky.entityBoost(0.0F, true), 0.0F,
+					"the hand was lifted along with the world it is held in front of");
+		});
+	}
+
 	/** One frame's detection of one sky, which is the shape every test above feeds on. */
-	private static void noteFrames(int frames, int skyId) {
-		for (int frame = 0; frame < frames; frame++) {
+	private static void noteFrames(int frames, int skyId) {		for (int frame = 0; frame < frames; frame++) {
 			WynncraftSky.note(skyId, PRIMARY_Y);
 			WynncraftSky.advance(FRAME);
 		}

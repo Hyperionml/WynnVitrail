@@ -111,6 +111,25 @@ public final class WynncraftPatch {
 	/** @see #SKY_PRIMARY */
 	static final String SKY_RECENT = "wynnSkyRecentId";
 
+	/**
+	 * The uniform that lifts an entity out of a scene one of the dark skies has darkened.
+	 * <p>
+	 * <strong>A uniform of this engine's own rather than the pack's, and the same shape as
+	 * {@link #DAY_CLOCK}.</strong> The number moves with the sky and with how far into it the
+	 * picture has come, so it cannot be a constant woven into the text, and it is not a name any
+	 * pack has written, so it is declared on every program the effects reach rather than looked for
+	 * in the ones that happen to have it. {@link WynncraftUniforms} is what fills it and
+	 * {@link WynncraftSky#entityBoost} is the rule it is filled from.
+	 * <p>
+	 * <strong>One of the three things that rule answers is this program's own phase, and that is the
+	 * one place this port departs from WynnIris.</strong> WynnIris withholds its light tweaks from a
+	 * hand program at translation time ({@code EntityPatcher.java:1446}), which is a decision about
+	 * the text of a translation and would have to be carried in the key that text is cached under.
+	 * Here the hand is answered with a one as the value is written, which is one multiply by one and
+	 * no key at all. {@code WynncraftSky#entityBoost} carries the whole argument.
+	 */
+	public static final String ENTITY_BOOST = "wynnEntityBoost";
+
 	private WynncraftPatch() {
 	}
 
@@ -402,11 +421,12 @@ public final class WynncraftPatch {
 	 * <li><strong>The fade sixth.</strong> A translucent limb is faded AND reduced, so the two
 	 * multiply rather than one standing in for the other, and it is guarded on the sky because a
 	 * sky is a colour the drawing chose and not a limb at a distance.</li>
-	 * <li><strong>The self-lit lift last.</strong> It reads the same two things the glint does - the
-	 * decoded number and the texture - and both have to be settled before it can decide whether this
-	 * fragment is a tint, which is the one case it excuses. It is the one step of the seven that
-	 * answers to a second switch as well as to the sky: the mesh's own flags can ask for the light
-	 * tweaks to stand, and a mesh that asked has been lit by the server already.</li>
+	 * <li><strong>The light tweaks last.</strong> Two arms of one block: the self-lit mark's lift,
+	 * which reads the decoded number and the texture and has both settled by now, and the
+	 * compensation for a sky that darkened the scene, which is the arm every unmarked fragment
+	 * takes. It is the one step of the seven that answers to a second switch as well as to the sky:
+	 * the mesh's own flags can ask for the light tweaks to stand, and a mesh that asked has been lit
+	 * by the server already.</li>
 	 * </ol>
 	 * <p>
 	 * <strong>Four of the seven carry a guard on the sky and three do not, which is WynnIris's own
@@ -530,16 +550,23 @@ public final class WynncraftPatch {
 		statements.append("if (!wynnSkyApplied) { ").append(output).append(" *= ").append(fade)
 				.append("; } ");
 
-		if (sampler != null) {
-			// Two guards and not one, which is the pair WynnIris closes its whole light-tweak block
-			// with ({@code EntityPatcher.java:1497}). The first is the one the unlit correction
-			// above carries: a sky is a colour the drawing chose, and lifting it to the art's own
-			// colour is a change to a colour no pack produced. The second is the mesh's own flags,
-			// and what it is for is an art the server has already lit itself - a lift there would
-			// be the second helping of a brightness that was painted on.
-			statements.append("if (!wynnSkyApplied && !wynnSkipLights) ")
-					.append(WynncraftShading.emissive(output, sampler, "wynnEffect"));
-		}
+		// The light tweaks last of everything that touches the colour, and they are the one step
+		// asked of every program rather than only of one that declared a texture: the two marks are
+		// a property of a sprite and go with the sprite when there is none, and the compensation for
+		// the sky's own darkening is a property of the scene and is withheld from nothing.
+		// WynncraftShading.skyCompensation carries why the split falls there and not around the
+		// whole block.
+		//
+		// Two guards and not one, which is the pair WynnIris closes its whole light-tweak block
+		// with ({@code EntityPatcher.java:1497}). The first is the one the unlit correction above
+		// carries: a sky is a colour the drawing chose, and lifting it to the art's own colour - or
+		// to half again its own - is a change to a colour no pack produced. The second is the mesh's
+		// own flags, and what it is for is an art the server has already lit itself: a lift there
+		// would be the second helping of a brightness that was painted on.
+		statements.append("if (!wynnSkyApplied && !wynnSkipLights) ")
+				.append(sampler != null
+						? WynncraftShading.lightTweaks(output, sampler, "wynnEffect", ENTITY_BOOST)
+						: WynncraftShading.skyCompensation(output, ENTITY_BOOST));
 
 		if (second != null && vlAlbedo) {
 			statements.append(suppressVlAlbedo(second));

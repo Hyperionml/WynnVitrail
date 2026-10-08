@@ -3,7 +3,8 @@ package dev.wynnvitrail;
 import dev.vitrail.glsl.GlslTranslator;
 
 /**
- * What Wynncraft writes into a texture's alpha, and the two things it means for a lit fragment.
+ * What Wynncraft writes into a texture's alpha, and what the two marks it makes there mean for a lit
+ * fragment - beside the lift that compensates for a sky the scene was darkened by.
  * <p>
  * <strong>A second signal family, carried the other way round.</strong> The glint and the
  * translucency level ride in the mesh's vertex colour ({@link WynncraftSignals}) and are read before
@@ -29,23 +30,26 @@ import dev.vitrail.glsl.GlslTranslator;
  * which is what makes a lit torch on a mob's model stay lit in a dark scene.</li>
  * </ul>
  * <p>
- * <strong>The strength is a constant, as the glint's two brightnesses are</strong> and for the same
- * reason: WynnIris reads it from Iris's own video settings ({@code iris_wynncraftEntityEmissivity},
- * {@code IrisVideoSettings.java:21}, shipped at a hundred out of a hundred), and this engine has no
- * such settings, so a uniform nothing fills would be a number the driver leaves at nought and a
- * self-lit piece that stayed dark. The mix is written out rather than folded into the
- * {@code max} it resolves to at one, so that the day this becomes a setting the change is the
- * declaration and not the formula.
+ * <strong>Those two strengths are constants, as the glint's two brightnesses are</strong> and for
+ * the same reason: WynnIris reads them from Iris's own video settings
+ * ({@code iris_wynncraftEntityEmissivity}, {@code IrisVideoSettings.java:21}, shipped at a hundred
+ * out of a hundred), and this engine has no such settings, so a uniform nothing fills would be a
+ * number the driver leaves at nought and a self-lit piece that stayed dark. The mix is written out
+ * rather than folded into the {@code max} it resolves to at one, so that the day either becomes a
+ * setting the change is the declaration and not the formula.
  * <p>
- * <strong>The brightness boost WynnIris pairs with these is deliberately absent, and the item tint
- * it pairs with them is not.</strong> The boost compensates for a scene a dark skybox has tinted,
- * and is worth one exactly while such a skybox is fading in, so it is a multiply by one until the
- * CPU half that decides which sky is on screen is written - and a step that is always a multiply by
- * one is a step that would be read as working. The item tint is the other half of that pair and is
- * drawn: it lives in {@code WynncraftPatch.epilogue} beside these two, reads the item's own
- * identifier, and is gated on the draw being an item the game told the id of, which this engine
- * publishes on the entity mesh like every other identifier of the three
- * ({@code GlslTranslator.ENTITY_IDS}).
+ * <strong>The lift WynnIris pairs with the self-lit mark is here, and it is that mark's other
+ * arm.</strong> Where no mark is on a texel the fragment is not left alone: a scene one of the dark
+ * skies has darkened takes its entities with it, and {@link WynncraftSky#entityBoost} is how much
+ * they are lifted back. It is one wherever no such sky is fading in, so the arm is a multiply by one
+ * nearly always - and the two arms exclude each other because only one of them can be about the
+ * same piece of art. The number comes off the sky rather than off a threshold here, which is why it
+ * is a name the caller passes and a member of the block rather than a constant.
+ * <p>
+ * The item tint WynnIris pairs with all of these is drawn beside them in
+ * {@code WynncraftPatch.epilogue}: it reads the item's own identifier and is gated on the draw being
+ * an item the game told the id of, which this engine publishes on the entity mesh like every other
+ * identifier of the three ({@code GlslTranslator.ENTITY_IDS}).
  */
 final class WynncraftShading {
 
@@ -139,32 +143,83 @@ final class WynncraftShading {
 	}
 
 	/**
-	 * The self-lit piece's own colour, lifted into the fragment the pack has already decided.
+	 * The two corrections a marked texel calls for, and the compensation for a dark sky where
+	 * neither mark is on it.
 	 * <p>
-	 * <strong>It is a mix rather than an assignment, and that is what keeps a lit piece from
-	 * becoming a flat one.</strong> Lifting to the art's own colour would throw away every darkening
-	 * the pack meant - a piece in shadow, a piece under water, a piece in a boss's purple light
-	 * - and the strength at one still reads as a lift because {@code max} takes the brighter of the
-	 * two. What the setting buys when it is not one is the ability to settle somewhere between the
-	 * two colours, which is why the argument is not folded away.
+	 * <strong>One block with two arms, because the marks and the compensation are exclusive.</strong>
+	 * A self-lit piece is drawn at its own brightness and a piece under a storm is drawn brighter
+	 * than the pack left it; doing both would lift a lamp that the sky had already been compensated
+	 * for. WynnIris writes the pair as an {@code if} and an {@code else} of one block
+	 * ({@code EntityPatcher.java:1496-1513}) and samples the texel once for both, which is why this
+	 * is one method rather than the two it was: the sample a shape test needs is the same sample the
+	 * branch needs, and a second call would take it twice.
 	 * <p>
-	 * <strong>The shader tints are excused, and the range is WynnIris's.</strong> Numbers fifteen to
-	 * twenty-four are the ten colour tints, and a tinted piece is being drawn with a colour the
-	 * server picked; lifting its art over that would take the tint off, so the tint wins. The test
-	 * is against the number as decoded rather than against the masked one the effect switch takes,
-	 * which is WynnIris's own choice ({@code EntityPatcher.java:1500}) and the same number the
-	 * library dispatches on once it is masked.
+	 * <strong>The shader tints are excused from the mark, and the range is WynnIris's.</strong>
+	 * Numbers fifteen to twenty-four are the ten colour tints, and a tinted piece is being drawn with
+	 * a colour the server picked; lifting its art over that would take the tint off, so the tint
+	 * wins. The test is against the number as decoded rather than against the masked one the effect
+	 * switch takes, which is WynnIris's own choice ({@code EntityPatcher.java:1500}) and the same
+	 * number the library dispatches on once it is masked. The mark is excused and the compensation is
+	 * not: a tinted piece under a storm is still a piece under a storm.
+	 * <p>
+	 * <strong>The strength is a constant, as the glint's two brightnesses are</strong> and for the
+	 * same reason: WynnIris reads {@code iris_wynncraftEntityEmissivity} from its own video settings
+	 * ({@code IrisVideoSettings.java:21}, shipped at a hundred out of a hundred), and this engine has
+	 * no such settings, so a uniform nothing fills would be a number the driver leaves at nought and
+	 * a self-lit piece that stayed dark. The mix is written out rather than folded into the
+	 * {@code max} it resolves to at one, so that the day it becomes a setting the change is the
+	 * declaration and not the formula.
 	 *
 	 * @param output  the name the pack's first colour output ended up with
 	 * @param sampler the name this program's diffuse atlas is declared under
 	 * @param effect  the name of the local holding this fragment's glint number
+	 * @param boost   the name of the member holding how far this draw's entities are lifted
 	 * @return the statements, for the wrapper, after the pack's own body
 	 */
-	static String emissive(String output, String sampler, String effect) {
-		return "{ vec4 wynnShadingTexel = texture(" + sampler + ", "
-				+ GlslTranslator.ENTITY_VERTEX_UV + "); if (" + IS_EMISSIVE_NAME
-				+ "(wynnShadingTexel) && !(" + effect + " >= 15 && " + effect + " <= 24)) { " + output
-				+ ".rgb = mix(" + output + ".rgb, max(" + output + ".rgb, wynnShadingTexel.rgb), "
-				+ "wynnEntityEmissivity); } } ";
+	static String lightTweaks(String output, String sampler, String effect, String boost) {
+		return "{ vec4 wynnShadingTexel = texture(" + sampler + ", " + GlslTranslator.ENTITY_VERTEX_UV
+				+ "); if (" + IS_EMISSIVE_NAME + "(wynnShadingTexel) && !(" + effect + " >= 15 && "
+				+ effect + " <= 24)) { " + output + ".rgb = mix(" + output + ".rgb, max(" + output
+				+ ".rgb, wynnShadingTexel.rgb), wynnEntityEmissivity); } else { " + compensation(output, boost)
+				+ "} } ";
+	}
+
+	/**
+	 * The compensation for a dark sky on its own, for a program with no diffuse atlas to read a mark
+	 * from.
+	 * <p>
+	 * <strong>Withheld from nothing, where the two marks above are withheld from a program that
+	 * declares no atlas.</strong> A mark is a property of a sprite and there is no sprite here to
+	 * read one out of, so the two arms that need one are dropped; the compensation is about the scene
+	 * the fragment stands in, which such a program is as much a part of as any other, and WynnIris
+	 * gives it to every program it patches. Dropping it here would leave the one family of entity
+	 * draws that has no texture outside the compensation, which is a dark sky's whole point.
+	 *
+	 * @param output the name the pack's first colour output ended up with
+	 * @param boost  the name of the member holding how far this draw's entities are lifted
+	 * @return the statements, for the wrapper, after the pack's own body
+	 */
+	static String skyCompensation(String output, String boost) {
+		return "{ " + compensation(output, boost) + "} ";
+	}
+
+	/**
+	 * What the compensation does to a colour, as the statements both callers above emit.
+	 * <p>
+	 * <strong>A luma ramp and not a flat multiply.</strong> A colour already bright is left exactly
+	 * as it was, and the boost is mixed in over the band below that, so a scene the sky darkened
+	 * gains its shadows back rather than gaining a wash. <strong>And a ceiling, because half again
+	 * past one is a colour the target cannot hold:</strong> left to the hardware, three channels
+	 * crossing the top together would clamp one by one and shift the hue of whatever crossed first,
+	 * so the multiplier is cut back to whatever keeps the brightest of them inside the range. The
+	 * floor on the divisor is what keeps a black fragment from dividing by nought, and is WynnIris's
+	 * own.
+	 */
+	private static String compensation(String output, String boost) {
+		return "float wynnBoostLuma = dot(" + output + ".rgb, vec3(0.2126, 0.7152, 0.0722)); "
+				+ "float wynnBoostScale = mix(" + boost + ", 1.0, smoothstep(0.3, 0.8, wynnBoostLuma)); "
+				+ "float wynnBoostMax = max(max(" + output + ".r, " + output + ".g), " + output
+				+ ".b); if (wynnBoostMax * wynnBoostScale > 1.0) { wynnBoostScale = 1.0 /"
+				+ " max(wynnBoostMax, 1e-5); } " + output + ".rgb *= wynnBoostScale; ";
 	}
 }

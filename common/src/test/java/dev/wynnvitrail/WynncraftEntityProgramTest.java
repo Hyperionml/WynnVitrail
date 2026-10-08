@@ -294,6 +294,29 @@ class WynncraftEntityProgramTest {
 							+ " wynnShadingTexel.rgb), wynnEntityEmissivity)"),
 					"the lift is not a mix at the setting's strength:\n" + fragment);
 
+			// And the compensation for a sky that darkened the scene, which is the other arm of the
+			// same block and the arm every unmarked fragment takes. Its value is a member of the
+			// block rather than a constant, because how far a sky has darkened a scene moves frame
+			// to frame; the member is declared here and filled by the runtime, and WynncraftSky is
+			// the rule behind the number.
+			assertTrue(fragment.contains("float wynnEntityBoost;"),
+					"the compensation is spent and never declared:\n" + fragment);
+			assertTrue(fragment.contains(
+							"float wynnBoostScale = mix(wynnEntityBoost, 1.0, smoothstep(0.3, 0.8,"
+									+ " wynnBoostLuma))"),
+					"the compensation is not ramped by the fragment's own brightness:\n" + fragment);
+			assertTrue(fragment.contains(
+							"if (wynnBoostMax * wynnBoostScale > 1.0) { wynnBoostScale = 1.0 /"
+									+ " max(wynnBoostMax, 1e-5); }"),
+					"a colour taken past one is left to the hardware to clamp:\n" + fragment);
+
+			// The two arms exclude each other, which is the whole reason they are one block: a
+			// self-lit piece is drawn at its own brightness and a piece under a storm is drawn
+			// brighter than the pack left it, and doing both would lift a lamp the sky had already
+			// been compensated for.
+			assertTrue(fragment.indexOf("wynnEntityEmissivity); } else { float wynnBoostLuma") > 0,
+					"the compensation is not the mark's other arm:\n" + fragment);
+
 			// The order, which is WynnIris's and is the one thing here a still picture could not
 			// show. Each neighbour has a reason: unlit reads the pack's own colour, the glint
 			// rebuilds the pixel, the reduction holds what the glint left, and the lift needs the
@@ -624,6 +647,15 @@ class WynncraftEntityProgramTest {
 					"an unlit texture was looked for on a program with none:\n" + text);
 			assertFalse(text.contains("wynnIsEmissive(wynnShadingTexel)"),
 					"a self-lit texture was looked for on a program with none:\n" + text);
+
+			// The compensation is the one step of the light tweaks that is not withheld, and the
+			// split falls where it does for a reason worth reading back: a mark is a property of a
+			// sprite and there is no sprite here, where a scene the sky has darkened is a property
+			// of the fragment and such a program is as much a part of one as any other.
+			assertTrue(text.contains("ofFragData0.rgb *= wynnBoostScale;"),
+					"a program with no atlas was left out of the sky's compensation:\n" + text);
+			assertFalse(text.contains("wynnShadingTexel"),
+					"a correction that needs a sprite was applied without one:\n" + text);
 		});
 	}
 

@@ -4393,6 +4393,7 @@ public final class GlslTranslator {
 		}
 
 		takeDayClock();
+		takeEntityBoost();
 
 		// The item tint's two inputs, named into the text the same way the day clock is taken: the
 		// identifier an item draw carries its id on, and the block entity's, whose high bits carry
@@ -4668,6 +4669,27 @@ public final class GlslTranslator {
 	private void takeDayClock() {
 		record(this.blockMembers, WynncraftPatch.DAY_CLOCK, "float " + WynncraftPatch.DAY_CLOCK);
 		this.injectedNames.add(WynncraftPatch.DAY_CLOCK);
+	}
+
+	/**
+	 * Takes the entity boost into the block, on every program the light tweaks reach.
+	 * <p>
+	 * <strong>The same shape as {@link #takeDayClock} and taken for a different reason.</strong> The
+	 * day clock is taken because it is this engine's own name and no pack has written it; the boost
+	 * is taken because its VALUE moves - it is how much a sky that is fading in has darkened the
+	 * scene - so it cannot be text the patch writes. Both are one member on a program whose pack
+	 * would never have declared them, and both are filled by a source in the catalogue rather than by
+	 * the pack. {@code WynncraftPatch#ENTITY_BOOST} and {@code WynncraftUniforms} carry the pair of
+	 * arguments.
+	 * <p>
+	 * Taken whether or not the one case it is zero in is being drawn, and that is the whole point of
+	 * it being a member rather than a decision here: a hand program is answered a one as the value is
+	 * written, which costs one multiply by one and keeps the hand out of the translation's cache key.
+	 */
+	private void takeEntityBoost() {
+		record(this.blockMembers, WynncraftPatch.ENTITY_BOOST,
+				"float " + WynncraftPatch.ENTITY_BOOST);
+		this.injectedNames.add(WynncraftPatch.ENTITY_BOOST);
 	}
 
 	/**
