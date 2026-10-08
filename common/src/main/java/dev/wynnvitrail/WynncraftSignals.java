@@ -20,6 +20,12 @@ package dev.wynnvitrail;
  * The names are spelled {@code wynn} rather than {@code iris}: every one of them is injected into a
  * pack's own file, where a pack is free to have used any name it likes, so they have to be ones no
  * pack would have written. Iris buys the same property by spelling its own {@code iris_}.
+ * <p>
+ * <strong>Two further families are marked in a texture's alpha rather than in the mesh</strong> -
+ * one says a piece of art is painted unlit, the other that it lights itself - and they are not
+ * decoded here. They are read off a texel rather than off a carried colour, and what they call for
+ * is a correction to the colour rather than a value spent on a branch, so they live beside it in
+ * {@link WynncraftShading}.
  */
 final class WynncraftSignals {
 
@@ -109,7 +115,10 @@ final class WynncraftSignals {
 	 * The other signal families WynnIris knows are not here - the effect and movement greens, and
 	 * the mount armour overlay's alpha markers - because none of them is decoded yet. Neutralising a
 	 * channel this engine cannot read would be asserting a format the same way an effect written
-	 * against it would, and the effects come next.
+	 * against it would, and the effects come next. The two that ride in a texture's alpha are
+	 * decoded, and are corrected rather than neutralised for a reason worth naming: a texture's
+	 * alpha is a channel the pack blends by on purpose, so taking the marker out of it would take
+	 * the blending with it. {@link WynncraftShading} leaves the alpha alone and fixes the colour.
 	 */
 	private static final String NEUTRALISE =
 			"vec4 " + NEUTRALISE_NAME + "(vec4 colour) {\n"

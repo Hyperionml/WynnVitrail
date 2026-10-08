@@ -139,19 +139,26 @@ public final class WynncraftPatch {
 	}
 
 	/**
-	 * The decode, for the header, and the effect library behind it where the effects are on.
+	 * The decode, for the header, and the effect libraries behind it where the effects are on.
 	 * <p>
-	 * <strong>Two libraries and not one, because they answer to different switches.</strong> The
+	 * <strong>Two groups and not one, because they answer to different switches.</strong> The
 	 * decode is what reads the signals and costs a handful of comparisons, so it is written wherever
-	 * {@link #carriesColour} is; the effect library is the picture and only the fragment stage that
-	 * is really given an application has anything to call it with. A program translated with the
-	 * effects off keeps the decode - which is what the offline test reads back - and carries none of
-	 * the effects' text.
+	 * {@link #carriesColour} is; the effect libraries are the picture, and only the fragment stage
+	 * that is really given an application has anything to call them with. A program translated with
+	 * the effects off keeps the decode - which is what the offline test reads back - and carries none
+	 * of the effects' text.
 	 * <p>
-	 * The library is written even where {@link #epilogue} ends up withholding the call, which
-	 * happens on a program declaring no diffuse sampler: an unused function is a few hundred lines
-	 * the compiler discards, and the alternative is a header that depends on the program's samplers
-	 * as well as on the switch, which is one more thing for the translation cache to be wrong about.
+	 * <strong>Two effect libraries rather than one, because the two signal families are read at
+	 * different moments.</strong> The glint and the translucency level come off the carried colour,
+	 * and {@link WynncraftGlint} is the nineteen effects they select; the unlit and self-lit markers
+	 * come off a texel, and {@link WynncraftShading} is the two corrections those call for. Both are
+	 * written on the one condition, that the program is given an application, and both stand above
+	 * the wrapper that calls them.
+	 * <p>
+	 * They are written even where {@link #epilogue} ends up withholding the calls, which happens on
+	 * a program declaring no diffuse sampler: an unused function is a few hundred lines the compiler
+	 * discards, and the alternative is a header that depends on the program's samplers as well as on
+	 * the switch, which is one more thing for the translation cache to be wrong about.
 	 */
 	public static List<String> helpers(ProgramStage stage, VertexInputs inputs) {
 		if (!carriesColour(stage, inputs)) {
@@ -167,6 +174,10 @@ public final class WynncraftPatch {
 		if (applies(stage, inputs)) {
 			lines.add("// WynnVitrail: the Wynncraft glint effects. See WynncraftGlint.");
 			for (String helper : WynncraftGlint.HELPERS) {
+				lines.addAll(helper.lines().toList());
+			}
+			lines.add("// WynnVitrail: what a texture's alpha says. See WynncraftShading.");
+			for (String helper : WynncraftShading.HELPERS) {
 				lines.addAll(helper.lines().toList());
 			}
 		}
@@ -213,12 +224,23 @@ public final class WynncraftPatch {
 	 * place from the other direction, its glint walking the pack's AST and rewriting the assignment
 	 * that writes the output, which is the same statement this appends one to.
 	 * <p>
-	 * <strong>The glint runs first and the reduction second, and the order is a result rather than a
-	 * preference.</strong> Seven of the effects rebuild the whole pixel, alpha included, out of the
-	 * texture they read - a shine and a tint both end at the texture's own alpha - so a reduction
-	 * applied first would be undone by any of them, where a clamp applied second holds whatever the
-	 * effect left and brings it down only if it is above the target. Iris appends them in this order
-	 * as well ({@code EntityPatcher.java:1487-1488}).
+	 * <strong>Four steps, and the order among them is a result rather than a preference.</strong> It
+	 * is WynnIris's own order ({@code EntityPatcher.java:1484-1513}), and each of the three
+	 * adjacencies has a reason:
+	 * <ol>
+	 * <li><strong>The unlit correction first</strong>, before anything rewrites the colour. It reads
+	 * the shading out of the colour by division, so it has to see the colour the pack produced: run
+	 * after a glint it would be dividing a pixel the effect had rebuilt out of the texture, and
+	 * dividing an effect's own output by a light is not what "painted unlit" meant.</li>
+	 * <li><strong>The glint second and the reduction third.</strong> Seven of the effects rebuild the
+	 * whole pixel, alpha included, out of the texture they read - a shine and a tint both end at the
+	 * texture's own alpha - so a reduction applied first would be undone by any of them, where a
+	 * clamp applied second holds whatever the effect left and brings it down only if it is above the
+	 * target.</li>
+	 * <li><strong>The self-lit lift last.</strong> It reads the same two things the glint does - the
+	 * decoded number and the texture - and both have to be settled before it can decide whether this
+	 * fragment is a tint, which is the one case it excuses.</li>
+	 * </ol>
 	 * <p>
 	 * The alpha is clamped to the target rather than multiplied by it, and the difference is
 	 * WynnIris's own correction rather than a preference: a pack that already carried the reduced
@@ -227,14 +249,20 @@ public final class WynncraftPatch {
 	 * would take the second case below the target and the first case further below it still, and
 	 * low-level VFX disappeared under it ({@code EntityPatcher.java:2183-2186}).
 	 * <p>
-	 * The tests are kept because the level of an ordinary fragment decodes to nought and the effect
-	 * of one to nought, and a branch that is not taken costs a fragment of the corpus nothing; the
-	 * alpha the reduction would write is one the minimum would not move in any case.
+	 * The branches are kept because the level of an ordinary fragment decodes to nought and the
+	 * effect of one to nought, and a branch that is not taken costs a fragment of the corpus nothing;
+	 * the alpha the reduction would write is one the minimum would not move in any case.
+	 * <p>
+	 * <strong>The two decoded numbers are read once, into locals of this block.</strong> Three of the
+	 * four steps want one of them and the self-lit lift wants both, and a decode repeated is a decode
+	 * that can drift. The effect's number is only read where there is a sampler to draw with, so a
+	 * program that has none is left with no local it does not use.
 	 *
-	 * @param output  the name the pack's first colour output ended up with, which is its own where
-	 *                it declared one and this engine's {@code ofFragData0} where it did not
+	 * @param output  the name the pack's first colour output ended up with, which is its own where it
+	 *                declared one and this engine's {@code ofFragData0} where it did not
 	 * @param sampler the name this program's diffuse atlas is declared under, or {@code null} where
-	 *                it declares none, which withholds the glint and keeps the reduction
+	 *                it declares none, which withholds everything that samples and keeps the
+	 *                reduction
 	 * @return the statements, or empty where this stage gets no application
 	 */
 	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output,
@@ -243,15 +271,30 @@ public final class WynncraftPatch {
 			return "";
 		}
 
-		StringBuilder statements = new StringBuilder();
+		String colour = GlslTranslator.ENTITY_VERTEX_COLOR;
+
+		StringBuilder statements = new StringBuilder("{ ");
 		if (sampler != null) {
+			statements.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
+					.append(colour).append("); ");
+		}
+
+		statements.append("int wynnLevel = ").append(WynncraftSignals.TRANSLUCENCY_NAME).append("(")
+				.append(colour).append("); ");
+
+		if (sampler != null) {
+			statements.append(WynncraftShading.shadeless(output, sampler));
 			statements.append(glint(sampler, output));
 		}
 
-		statements.append("{ int wynnLevel = ").append(WynncraftSignals.TRANSLUCENCY_NAME)
-				.append("(").append(GlslTranslator.ENTITY_VERTEX_COLOR).append("); if (wynnLevel > 0) { ")
-				.append(output).append(".a = min(").append(output).append(".a, ")
-				.append(WynncraftSignals.ALPHA_NAME).append("(wynnLevel)); } } ");
+		statements.append("if (wynnLevel > 0) { ").append(output).append(".a = min(").append(output)
+				.append(".a, ").append(WynncraftSignals.ALPHA_NAME).append("(wynnLevel)); } ");
+
+		if (sampler != null) {
+			statements.append(WynncraftShading.emissive(output, sampler, "wynnEffect"));
+		}
+
+		statements.append("} ");
 
 		return statements.toString();
 	}
@@ -265,6 +308,9 @@ public final class WynncraftPatch {
 	 * where a sprite lies in an atlas, and the library half is what to do with it once found. They
 	 * are here rather than inside the library because they are read off the MESH - the coordinate,
 	 * the middle of the sprite - and the library takes values.
+	 * <p>
+	 * The number itself is not decoded here: the wrapper reads it once into {@code wynnEffect}, which
+	 * the self-lit lift reads as well, and this is the branch on it.
 	 * <ul>
 	 * <li><strong>The item's own coordinate</strong>, which is the mesh's and not the pack's: see
 	 * {@link GlslTranslator#ENTITY_VERTEX_UV}.</li>
@@ -297,15 +343,16 @@ public final class WynncraftPatch {
 	 * The number is masked to thirty-one, which is WynnIris's own mask and not a guard against a
 	 * decode that ran away: five bits is what the signal's red can carry, and the mask is what makes
 	 * the thirty-second effect - the fogless piece - reachable only through the armour path that
-	 * names it directly rather than through a signal.
+	 * names it directly rather than through a signal. The self-lit lift reads the unmasked number,
+	 * which is WynnIris's own choice and does not matter here: the tint range it tests is below the
+	 * mask's edge, so both spellings agree over it.
 	 */
 	private static String glint(String sampler, String output) {
 		String uv = GlslTranslator.ENTITY_VERTEX_UV;
 		String mid = GlslTranslator.ENTITY_VERTEX_MID_TEX;
 
 		StringBuilder code = new StringBuilder();
-		code.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
-				.append(GlslTranslator.ENTITY_VERTEX_COLOR).append("); if (wynnEffect != 0) { ");
+		code.append("if (wynnEffect != 0) { ");
 		code.append("vec2 wynnSize = vec2(textureSize(").append(sampler).append(", 0)); ");
 		code.append("bool wynnAtlas = max(wynnSize.x, wynnSize.y) > 2000.0; ");
 		code.append("vec2 wynnUv = ").append(uv).append("; ");

@@ -180,9 +180,13 @@ class WynncraftEntityProgramTest {
 					"the glint's brightness is not the setting it was measured at:\n" + fragment);
 
 			// The number, off the varying and not off a uniform: this is the whole of what the
-			// vertex-side neutralisation exists to preserve.
+			// vertex-side neutralisation exists to preserve. Read once, because the two halves of
+			// the application that want it are not the only places it could have been written and a
+			// decode repeated is a decode that can drift.
 			assertTrue(fragment.contains("int wynnEffect = wynnGlintId(of_VertexColor);"),
 					"the effect number is not read off the carried colour:\n" + fragment);
+			assertTrue(fragment.indexOf("int wynnEffect =") == fragment.lastIndexOf("int wynnEffect ="),
+					"the effect number is decoded more than once:\n" + fragment);
 
 			// The call, with the program's own sampler name in the first argument.
 			assertTrue(fragment.contains("wynnApplyGlint(ofTexture, wynnEffect & 31, "),
@@ -198,9 +202,11 @@ class WynncraftEntityProgramTest {
 
 			// The order, which is the one thing about the pair that a still picture could not show:
 			// the glint runs first and the reduction second, because seven of the effects rebuild
-			// the alpha out of the texture and would undo a reduction applied before them.
+			// the alpha out of the texture and would undo a reduction applied before them. The
+			// reduction is named by its assignment rather than by its decode, which now stands above
+			// both of them.
 			assertTrue(fragment.indexOf("wynnApplyGlint(ofTexture,")
-							< fragment.indexOf("wynnTranslucency(of_VertexColor)"),
+							< fragment.indexOf("ofFragData0.a = min(ofFragData0.a, "),
 					"the reduction runs before the glint that would overwrite it:\n" + fragment);
 
 			// And both after the pack's own body, which is the seam the whole patch hangs off.
@@ -210,13 +216,94 @@ class WynncraftEntityProgramTest {
 	}
 
 	/**
+	 * The two corrections a texture's alpha calls for, and where they stand beside the glint.
+	 * <p>
+	 * The second signal family, and the one thing about it a build cannot tell: it is read off a
+	 * texel rather than off the carried colour, so it is the sampler the call has to reach for, and
+	 * the order it takes in the application is WynnIris's own and is not free - the unlit correction
+	 * has to see the colour the pack produced, and the self-lit lift has to see the number the glint
+	 * has already been dispatched on.
+	 */
+	@Test
+	void theUnlitAndSelfLitMarkersAreCorrectedWhereTheyLieInTheOrder(@TempDir Path pack)
+			throws IOException {
+		withSwitch("wynnvitrail.enabled", true, () -> {
+			String fragment = translate(pack).get(ProgramStage.FRAGMENT);
+
+			assertNotNull(fragment);
+
+			// The library, in the header, with the strength it is applied at. That strength is a
+			// constant here where WynnIris reads it from a video setting, so its value is the
+			// setting's default and is asserted rather than left to the two call sites to imply.
+			assertTrue(fragment.contains("bool wynnIsShadeless(vec4 texel)"),
+					"the fragment stage cannot tell an unlit texture:\n" + fragment);
+			assertTrue(fragment.contains("bool wynnIsEmissive(vec4 texel)"),
+					"the fragment stage cannot tell a self-lit texture:\n" + fragment);
+			assertTrue(fragment.contains("const float wynnEntityEmissivity = 1.0;"),
+					"the lift's strength is not the setting's default:\n" + fragment);
+
+			// The markers themselves, by their numbers, which are the whole of what makes them
+			// signals rather than alphas a pack might have meant.
+			assertTrue(fragment.contains("abs(texel.a * 255.0 - 251.0) < 0.5"),
+					"the unlit marker is not the one the server writes:\n" + fragment);
+			assertTrue(fragment.contains("return a == 254 && g != 251;"),
+					"the self-lit marker is not the one the server writes:\n" + fragment);
+
+			// Both applied, over this program's own texture and off the mesh's own coordinate: the
+			// marking is a property of the sprite, and a pack's own sample may have been taken
+			// elsewhere or not at all.
+			// The divisor goes through the neutraliser and not straight to the carried colour, which
+			// is the one place the two engines' expressions differ for a reason: WynnIris's carried
+			// colour is already white on a mesh that holds a signal, and this engine's is the signal
+			// itself. See WynncraftShading.shadeless.
+			assertTrue(fragment.contains("wynnIsShadeless(wynnShadingTexel)) { ofFragData0.rgb /="
+							+ " max(wynnNeutralColour(of_VertexColor).rgb, vec3(0.05)); }"),
+					"the unlit correction divides by the signal it is meant to ignore:\n" + fragment);
+			assertTrue(fragment.contains(
+							"wynnIsEmissive(wynnShadingTexel) && !(wynnEffect >= 15 && wynnEffect <= 24)"),
+					"the lift is applied where a tint was asked for:\n" + fragment);
+			assertTrue(fragment.contains("mix(ofFragData0.rgb, max(ofFragData0.rgb,"
+							+ " wynnShadingTexel.rgb), wynnEntityEmissivity)"),
+					"the lift is not a mix at the setting's strength:\n" + fragment);
+
+			// The order, which is WynnIris's and is the one thing here a still picture could not
+			// show. Each neighbour has a reason: unlit reads the pack's own colour, the glint
+			// rebuilds the pixel, the reduction holds what the glint left, and the lift needs the
+			// number to have been decoded before it can excuse a tint.
+			int unlit = fragment.indexOf("wynnIsShadeless(wynnShadingTexel)");
+			int glint = fragment.indexOf("wynnApplyGlint(ofTexture,");
+			int reduction = fragment.indexOf("ofFragData0.a = min(ofFragData0.a, ");
+			int lit = fragment.indexOf("wynnIsEmissive(wynnShadingTexel)");
+
+			assertTrue(unlit >= 0 && glint >= 0 && reduction >= 0 && lit >= 0,
+					"one of the four steps is missing:\n" + fragment);
+			assertTrue(unlit < glint, "the unlit correction runs after the glint rebuilt the pixel:\n"
+					+ fragment);
+			assertTrue(glint < reduction, "the reduction runs before the glint that would undo it:\n"
+					+ fragment);
+			assertTrue(reduction < lit, "the lift runs before the reduction has settled the alpha:\n"
+					+ fragment);
+
+			// And the whole of it after the pack's own body, as every step of the application is.
+			assertTrue(fragment.indexOf("ofPackMain();") < unlit,
+					"a correction runs before the pack has decided anything:\n" + fragment);
+
+			// The library stands in the header and not in the body, or the wrapper's calls would be
+			// calls to nothing.
+			assertTrue(fragment.indexOf("bool wynnIsShadeless(vec4 texel)")
+							< fragment.indexOf("ofPackMain();"),
+					"the library is written below the code that calls it:\n" + fragment);
+		});
+	}
+
+	/**
 	 * A program that declares no diffuse texture.
 	 * <p>
-	 * The glint has nothing to draw over there - it samples the item's own sprite and reads the
-	 * texture's size to know whether it is looking at an atlas - so the call is withheld. What is
-	 * NOT withheld is the reduction, which reads the carried colour alone, and that is the point of
-	 * the split: a program that cannot take one half of the patch still gets the other rather than
-	 * losing both.
+	 * Neither the glint nor either of the shading corrections has anything to read there - all three
+	 * sample the item's own sprite, and the glint reads the texture's size to know whether it is
+	 * looking at an atlas - so all three are withheld. What is NOT withheld is the reduction, which
+	 * reads the carried colour alone, and that is the point of the split: a program that cannot take
+	 * one half of the patch still gets the other rather than losing both.
 	 */
 	@Test
 	void aProgramWithNoDiffuseTextureStillGetsTheReduction(@TempDir Path pack) throws IOException {
@@ -236,10 +323,14 @@ class WynncraftEntityProgramTest {
 
 			assertTrue(text.contains("wynnTranslucency(of_VertexColor)"),
 					"the reduction was dropped with the glint:\n" + text);
-			// The declaration is in the header either way and is not what is asked about; the call
-			// is the assignment, and it is the one that must not be there.
+			// The declarations are in the header either way and are not what is asked about; the
+			// calls are the assignments, and they are the ones that must not be there.
 			assertFalse(text.contains("= wynnApplyGlint("),
 					"the glint was called on a program with no sprite to draw over:\n" + text);
+			assertFalse(text.contains("wynnIsShadeless(wynnShadingTexel)"),
+					"an unlit texture was looked for on a program with none:\n" + text);
+			assertFalse(text.contains("wynnIsEmissive(wynnShadingTexel)"),
+					"a self-lit texture was looked for on a program with none:\n" + text);
 		});
 	}
 
@@ -279,6 +370,12 @@ class WynncraftEntityProgramTest {
 					"the alpha of a vec3 was written:\n" + text.get(ProgramStage.FRAGMENT));
 			assertFalse(text.get(ProgramStage.FRAGMENT).contains("= wynnApplyGlint("),
 					"the glint was drawn into a vec3:\n" + text.get(ProgramStage.FRAGMENT));
+			// The shading corrections write colour alone and a vec3 has colour, so this half is
+			// narrower than it has to be and the test says so rather than leaving it to be
+			// discovered: the gate is one gate, and Emitter.wynncraftEpilogue carries why.
+			assertFalse(text.get(ProgramStage.FRAGMENT).contains("wynnShadingTexel"),
+					"a correction was written into a slot the application refused:\n"
+							+ text.get(ProgramStage.FRAGMENT));
 			assertFalse(text.get(ProgramStage.FRAGMENT).contains("ofPackMain"),
 					"the body was wrapped for an application that was refused:\n"
 							+ text.get(ProgramStage.FRAGMENT));

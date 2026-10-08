@@ -718,7 +718,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 	 * where it declared one: this is text of ours standing in the pack's own {@code main}, so the
 	 * body's write is under whichever name that body kept. The atlas sampler travels with it for the
 	 * reason {@code GlslTranslator.atlasSampler} gives, and is {@code null} on a program that
-	 * declares none, where the glint has no sprite to draw over and only the reduction is emitted.
+	 * declares none, where nothing that samples can run and only the reduction is emitted.
 	 * <p>
 	 * Refused where the stage has no colour output at all, which is a stage with nothing for the
 	 * application to write, and where the one it has is not a {@code vec4}. The first is refused by
@@ -726,7 +726,11 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 	 * reason, a split most of all; {@code WynncraftPatch.mayWriteAlpha} carries what the second is
 	 * about and why the alpha test asks the same question. The second keeps the glint out too,
 	 * because an effect rebuilds the whole pixel - colour and alpha together - and there is no
-	 * fourth thing to put back into a slot holding three.
+	 * fourth thing to put back into a slot holding three. It keeps the two shading corrections out
+	 * with it, and that half is narrower than it has to be: both write colour alone and a
+	 * {@code vec3} has colour. It is left as one gate because the pack it would serve is one whose
+	 * slot nought this engine already declined to read as a colour, and the correction is much the
+	 * smaller half of what such a pack loses.
 	 */
 	private String wynncraftEpilogue(Set<String> shadowed) {
 		if (this.maxFragmentOutput < 0) {
