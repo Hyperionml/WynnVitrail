@@ -2,6 +2,7 @@ package dev.vitrail.render;
 
 import dev.vitrail.pack.source.ShadowCasters;
 import dev.vitrail.Vitrail;
+import dev.wynnvitrail.WynntilsCompat;
 
 import com.mojang.blaze3d.GpuDeviceLossException;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -406,6 +407,13 @@ public final class ShadowGeometry {
 
 		if (casters.entities()) {
 			for (Entity entity : minecraft.level.entitiesForRendering()) {
+				// Before the frustum test and not after it, which is where Iris puts the same line
+				// ({@code shadows/ShadowRenderer.java:743}): the question is whether this is a
+				// caster at all, and one that something else has taken out of the picture is not.
+				if (WynntilsCompat.isHiddenByWynntils(entity)) {
+					continue;
+				}
+
 				// The entity's own tick, which extract takes too and 26.3's culling box is built at.
 				float partial = delta.getGameTimeDeltaPartialTick(!ticks.isEntityFrozen(entity));
 				if (visible(minecraft, entities, entity, frustum, at, partial)) {
