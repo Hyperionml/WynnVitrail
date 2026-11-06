@@ -11,65 +11,82 @@ publishing a jar named after one thing and built from another.
 Everything is a pre-release while the version stays under `1.0.0`. Nothing here is a promise about
 what the next one holds.
 
-## 0.12.0-beta-wynn3
-
-### Fixed
-
-- **The game no longer stops drawing the pack the first time a Wynncraft sky arrives.** The pass that
-  tints and fogs the scene under a sky asks the graphics device for a block of uniform memory, and
-  the block was allocated four bytes short of the second of the two matrices it holds. Nothing
-  compiled wrong and nothing validated wrong: the write ran off the end of the buffer and Vitrail
-  stopped drawing the pack, which is the message a player saw as `newPosition > limit: (128 > 80)`.
-  The three blocks drawn over a finished frame are now the size of the members their own shaders
-  declare, and a test reads each shader's declaration and holds the two together, so the next member
-  added to one side of a block and not the other fails a build rather than a session.
-
-- **The sky a player is under is now named in the log.** It was already being read and settled - the
-  line for it is in the release below - and it is what told this bug from the several it could have
-  been.
-
-## 0.12.0-beta-wynn2
-
-The Wynncraft half of the fork, one revision on from the first jar. Everything below is aimed at a
-player on Wynncraft; on any other world none of it can fire, because none of it can find the
-signals it reads.
+## 0.13.0-beta
 
 ### Added
 
-- **The scene under a Wynncraft sky is drawn with it.** Four of the seven skies Wynncraft paints
-  darken and tint the world they hang over, and the world used to keep its own colour under them -
-  a storm's mood stopped at the edge of the dome. The colour of the sky a player is under is now
-  read off the dome itself, followed through a fade in and out, and spread over the terrain as an
-  ambient shift, a darkening that spares what is already dark, and a fog that heads towards the sky
-  in the direction each piece of ground lies in. A player who wonders which sky the mod thinks they
-  are under will find it said in the log every time it changes.
-- **Entities are lifted back out of that darkening.** A mob in a storm was being darkened along
-  with the ground it stood on, and at night the two closed on black. Anything under one of the four
-  dark skies is now drawn up to half again as bright while the sky is in, which the effects of a
-  Wynncraft weapon and a self-lit piece of art both sit out, since neither is a thing the sky
-  darkened.
-- **Text stays readable under those skies.** A sign or a name plate is lit by the light where it
-  stands, which the sky has just darkened, so its letters were left describing a world that is no
-  longer on screen. The light is now raised under a dark sky, further for dark letters than for pale
-  ones, and a text display's own glow is carried up with it. Rain stops it, because a storm is dark
-  enough on its own.
-- **A beacon another mod has hidden no longer casts a shadow.** Wynntils takes its activity beacons
-  out of the picture by a flag rather than out of the world, and the shadow map is filled on a walk
-  of its own that never saw that flag.
+- **`K` turns shaders off and back on**, as it does under Iris. Turning them back on returns to
+  the pack you had picked, and a line in chat says which way it went. If the pack cannot be drawn,
+  because it fails to load, is no longer in the folder or none was picked, shaders stay off and
+  the line says why, so the next press tries again. The key can be moved in the game's controls,
+  under Vitrail, beside the two that open the settings and reload the pack.
 
 ### Fixed
 
-- **The transition screens are drawn over the misted picture.** A transition used to be painted
-  over the frame as it stood before the Mist Woods fog went on, so a screen arriving while the woods
-  were misted showed a seam. The three effects drawn over a finished frame now see each other, in
-  the order WynnIris draws them: mist, then the scene under a sky, then the screen.
-- **A Wynncraft sky moves between ticks.** Its dome was animated from a clock counted in whole
-  ticks, so a sky stepped twenty times a second where WynnIris's slides, and the dome and the scene
-  drawn under it were counting differently. Both now read the same clock, with the frame's fraction
-  of a tick on it.
-- **A mesh that asks for the entity light tweaks to stand is obeyed.** Wynncraft marks such a mesh
-  in the high bits of an identifier, and the self-lit lift was being applied over art the server had
-  already lit.
+- **Distant Horizons' own clouds stay out of a pack that asks for that.** With Distant Horizons
+  installed, its blocky clouds were drawn over the pack's sky even when the pack writes
+  `dhClouds=off`, as Complementary does. They were hardest to miss under blindness, where the
+  pack's own clouds go dark and Distant Horizons' stayed bright. They are now held off for as long
+  as such a pack is loaded, as Iris does, and your own Distant Horizons setting is left as it was.
+- **Distant Horizons' menu says who holds a setting it will not let you move.** Where a pack
+  draws the far terrain, Vitrail holds off Distant Horizons' own fog and ambient occlusion, and
+  its clouds wherever a pack asks. The menu showed those lines locked and "controlled by
+  UNKNOWN", and Distant Horizons wrote a warning in the log for each. They are now held under
+  Vitrail's name, on a Distant Horizons recent enough to take one.
+- **Mining a block shows its cracks again on 26.3.** With a shader pack loaded, the crack overlay
+  never appeared and the block simply broke. 26.3 draws the crack over an ordinary block earlier in
+  the frame than 26.2 did, among the solid features, and Vitrail was only waiting for it among the
+  translucent ones. It is now drawn with the pack's `gbuffers_damagedblock` at either moment, so the
+  crack over stone and the crack over glass both show.
+- **Banners show their colours and patterns again on 26.3.** With a shader pack loaded, every
+  banner was plain white cloth. 26.3 draws a banner's colour layers among the solid features where
+  26.2 drew them with the translucent ones, and Vitrail only served them at the later moment, so
+  the game painted the colours itself underneath the pack's cloth. They are drawn with the pack's
+  translucent block program at the moment the game draws them, as under Iris.
+- **Bliss-based packs draw again, Eclipse among them.** Three things stood in their way, the
+  first two enough to turn the whole pack off:
+  - A pack may keep data in a one dimensional image. Bliss keeps a line of block data that way,
+    and the game's shader checks refused every program reading it, the pack's composites among
+    them. One dimensional images now pass those checks, as three dimensional ones already did.
+  - A pack may define a macro twice with different bodies, which NVIDIA's driver accepts and the
+    compiler Vitrail uses does not. Eclipse's composite2 does it with `diagonal3`. Each use now
+    gets the body in force where it stands, which is the driver's reading.
+  - A geometry stage that only passes each corner on is folded into the stage after it on a Mac.
+    Eclipse's terrain writes that stage in a shape the fold did not read (a block of varyings read
+    one corner at a time, a counter declared ahead of its loop, the position held in a local), so
+    the pack's terrain program was set aside and the terrain drawn without it. It is folded now.
+- **A held item no longer streaks while the player walks, on a Mac.** Under Photon the item in hand
+  carried short light dashes, one column every 32 pixels, for as long as the walk bob kept it
+  moving. Vitrail puts the game's own picture wherever something the game drew stands in front of
+  the pack's geometry, and it tells the two apart by comparing the depth the pack's fragment stage
+  saw with the depth the GPU stored. On a Mac the two can differ by a unit in the last place on
+  some pixels of a sloped surface, so those pixels read as covered and got the game's colour in
+  place of the pack's gbuffer. A difference that small no longer counts as something in front.
+- **The sky no longer turns one flat pink when far terrain is loaded and none of it is in view.**
+  With Distant Horizons, or a mod standing in for it, a pack is told there is far terrain and reads
+  its depth. On a frame where none of it is on screen, such as looking at the sky from above the
+  world's build height, Vitrail handed that depth over as a single texel. Photon reads it pixel by
+  pixel, found far terrain at the camera everywhere past that texel, and painted the whole view in
+  one pinkish colour. The depth is now the far plane across the whole screen, as the mod's own
+  image is under Iris.
+- **A beacon beam's core no longer stops sixteen blocks above the camera.** With the pack drawing
+  the sky, the bright inner beam ended at a flat line sixteen blocks over the player's eyes that
+  rose and fell with them, while the faint outer glow went on up. Vitrail lets the game's own
+  picture through wherever the game drew something in front of the pack's, and it took the sky to
+  stand where the game builds it, sixteen blocks up, so whatever the game drew above that height
+  lost to the pack's sky. The sky now counts as infinitely far away, as it does under Iris, which
+  also lifts the same cut from the End, where the game builds its sky a hundred blocks out.
+- **The name of a player behind a wall shows again with a pack on, on Minecraft 26.3.** The game
+  does not hide the name of a player standing behind a wall, it dims it, and 26.3 draws that
+  dimmed name on its own after the water and the outlines. Vitrail was not catching that last
+  draw, so the name went into the game's own picture, which the pack's final pass paints over,
+  and it was simply missing. It is now drawn by the pack like the name of a player in the open,
+  dimmed as the game dims it. The name of a sneaking player stays hidden behind a wall, as it is
+  without a pack.
+
+Thanks to elNino0916 for the toggle key, the Distant Horizons clouds and the crack, Jolymmiles for
+the Bliss-based packs and the test net, JakobMusix for the beacon beam, DebZakari for the names
+behind walls, and Heerless for digging into the bells crash.
 
 ## 0.12.0-beta
 

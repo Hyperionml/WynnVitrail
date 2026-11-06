@@ -1,5 +1,6 @@
 package dev.vitrail.render;
 
+import dev.wynnvitrail.WynnOption;
 import dev.vitrail.Vitrail;
 import dev.vitrail.uniform.WorldState;
 import dev.wynnvitrail.WynncraftMist;
@@ -13,6 +14,7 @@ import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.ShaderSource;
@@ -73,6 +75,8 @@ final class WynncraftOverlay {
 
 	private static final Identifier VERTEX_ID =
 			Identifier.fromNamespaceAndPath(Vitrail.MOD_ID, "pack/wynn_overlay_vertex");
+	private static final Identifier SKY_FRAGMENT_ID =
+			Identifier.fromNamespaceAndPath(Vitrail.MOD_ID, "pack/wynn_sky_fragment");
 	private static final Identifier FOG_FRAGMENT_ID =
 			Identifier.fromNamespaceAndPath(Vitrail.MOD_ID, "pack/wynn_fog_fragment");
 	private static final Identifier SCENE_FRAGMENT_ID =
@@ -93,7 +97,7 @@ final class WynncraftOverlay {
 
 	private static final String LABEL = "Vitrail Wynncraft overlay";
 
-	private static final String VERTEX = """
+	static final String VERTEX = """
 			#version 460 core
 
 			in vec3 Position;
@@ -204,26 +208,17 @@ final class WynncraftOverlay {
 	 * and the seam would be a horizon. {@code WynncraftPatch.skyLibrary} is that library and the
 	 * javadoc there says why it is the seam.
 	 * <p>
-	 * <strong>Four things about the arithmetic are WynnIris's and one is not.</strong> The distance
-	 * fade and the fog fade are its own two ramps against the plane the pack is told is far, the
-	 * darkening spares a fragment below the luminance band it spares, and the ambient table is its
-	 * seven rows. What is not is the scene darkening slider: WynnIris multiplies the tint by it and
-	 * it ships at a hundred out of a hundred, so it is not carried and the expression is one factor
-	 * shorter. The alpha is the other way round and is this engine's own: WynnIris writes one into
-	 * the target, and this keeps the picture's own, because a target's alpha is a channel something
-	 * after it may be reading and one pass flattening it is a change nobody asked for.
-	 * <p>
-	 * <strong>Sky-depth pixels are left exactly as they were.</strong> WynnIris's own comment gives
-	 * the reason twice over: the sky has already been painted, and a translucent effect drawn over it
-	 * - a rift, a volume of mist - must not be fogged twice for standing on top of one. So the test
-	 * is the scene's own depth in the pack's window, where the sky is exactly one, and a fragment at
-	 * it is handed back untouched.
+	 * SceneTime.y carries the sky opacity scaled by scene darkening. Keep the input alpha, as
+	 * later passes can still read it. Terrain distance uses the visible scene depth, but terrain
+	 * must have been present before translucent features drew. Otherwise a translucent item that
+	 * wrote depth over empty sky would receive the terrain fog and darkening a second time.
 	 */
 	static final String SCENE = "#version 460 core\n"
 			+ """
 			uniform sampler2D InSampler;
 			uniform sampler2D DepthScene;
 			uniform sampler2D DepthOpaque;
+			
 
 			layout(std140) uniform OfWynnScene {
 				mat4 InvProjMat;
@@ -236,19 +231,8 @@ final class WynncraftOverlay {
 			layout(location = 0) out vec4 ofFragData0;
 
 			"""
-			+ WynncraftPatch.skyLibrary()
+			+ WynnSkyShader.SOURCE
 			+ """
-			void wynnSkyAmbient(int id, out vec3 ambient, out float darkening, out float baseTint) {
-			    if (id == 1) { ambient = vec3(0.75, 0.78, 0.85); darkening = 0.65; baseTint = 0.30; }
-			    else if (id == 2) { ambient = vec3(0.5, 0.45, 0.55); darkening = 0.40; baseTint = 0.40; }
-			    else if (id == 3) { ambient = vec3(0.3, 0.3, 0.33); darkening = 0.35; baseTint = 0.40; }
-			    else if (id == 4) { ambient = vec3(0.6, 0.15, 0.1); darkening = 0.40; baseTint = 0.35; }
-			    else if (id == 5) { ambient = vec3(0.5, 0.15, 0.1); darkening = 0.40; baseTint = 0.35; }
-			    else if (id == 6) { ambient = vec3(1.0, 0.95, 0.85); darkening = 1.0; baseTint = 0.10; }
-			    else if (id == 7) { ambient = vec3(0.4, 0.12, 0.08); darkening = 0.30; baseTint = 0.45; }
-			    else { ambient = vec3(1.0); darkening = 1.0; baseTint = 0.0; }
-			}
-
 			void main() {
 			    float skyTime = SceneTime.x;
 			    float opacity = SceneTime.y;
@@ -259,12 +243,13 @@ final class WynncraftOverlay {
 			    if (skyId <= 0 || opacity <= 0.001) { ofFragData0 = existing; return; }
 
 			    // The sky and what stands in front of it: see the comment on SCENE.
-			    if (texture(DepthScene, ofTexCoord).r > 0.999999) { ofFragData0 = existing; return; }
-
+			    float sceneDepth = texture(DepthScene, ofTexCoord).r;
+			    // The translucent item pass can write scene depth. Keep its colour over
+			    // clear sky even when its own fragment is closer than the far plane.
 			    float opaqueDepth = texture(DepthOpaque, ofTexCoord).r;
-			    if (opaqueDepth > 0.999999) { ofFragData0 = existing; return; }
+			    if (opaqueDepth > 0.999999 || sceneDepth > 0.999999) { ofFragData0 = existing; return; }
 
-			    vec4 viewPos = InvProjMat * vec4(ofTexCoord * 2.0 - 1.0, opaqueDepth * 2.0 - 1.0, 1.0);
+			    vec4 viewPos = InvProjMat * vec4(ofTexCoord * 2.0 - 1.0, sceneDepth * 2.0 - 1.0, 1.0);
 			    float linearDist = (abs(viewPos.w) > 1e-6) ? max(-viewPos.z / viewPos.w, 0.0) : 0.0;
 			    vec3 viewDir = (abs(viewPos.w) > 1e-6) ? viewPos.xyz / viewPos.w : vec3(0.0, 0.0, -1.0);
 			    vec3 worldDir = normalize((InvViewMat * vec4(viewDir, 0.0)).xyz);
@@ -272,7 +257,7 @@ final class WynncraftOverlay {
 			    vec3 ambient;
 			    float darkening;
 			    float baseTint;
-			    wynnSkyAmbient(skyId, ambient, darkening, baseTint);
+			    getSkyboxAmbient(skyId, ambient, darkening, baseTint);
 
 			    // The ambient shift arrives with distance and the darkening does not: near the player
 			    // the scene keeps its own colour, and a storm's mood is something the far half of a
@@ -288,7 +273,7 @@ final class WynncraftOverlay {
 			    vec3 darkened = shifted * mix(1.0, darkening, tintStrength * darkenScale);
 
 			    // And the fog, towards the sky in the direction this fragment lies in.
-			    vec4 sky = wynnSkyApply(skyId, skyTime, worldDir);
+			    vec4 sky = computeSkybox(skyId, skyTime, worldDir);
 			    float fogFade = smoothstep(32.0, lodFarPlane * 0.5, linearDist);
 			    ofFragData0 = vec4(mix(darkened, sky.rgb, fogFade * tintStrength), existing.a);
 			}
@@ -371,8 +356,45 @@ final class WynncraftOverlay {
 			}
 			""";
 
+	static final String SKY = """
+			#version 460 core
+			uniform sampler2D DepthOpaque;
+			uniform sampler2D DepthLod;
+			layout(std140) uniform OfWynnScene {
+				mat4 InvProjMat;
+				mat4 InvViewMat;
+				vec4 SceneTime;
+			};
+			in vec2 ofTexCoord;
+			layout(location = 0) out vec4 skyColor;
+			""" + WynnSkyShader.SOURCE + """
+			bool skyAt(vec2 uv) {
+				return min(texture(DepthOpaque, uv).r, texture(DepthLod, uv).r) > 0.999999;
+			}
+			void main() {
+				vec2 texel = 1.0 / vec2(textureSize(DepthOpaque, 0));
+				float coverage = 1.0;
+				bool isSky = skyAt(ofTexCoord);
+				if (!isSky) {
+					coverage = 0.25 * (float(skyAt(ofTexCoord + vec2(texel.x, 0.0)))
+						+ float(skyAt(ofTexCoord - vec2(texel.x, 0.0)))
+						+ float(skyAt(ofTexCoord + vec2(0.0, texel.y)))
+						+ float(skyAt(ofTexCoord - vec2(0.0, texel.y))));
+					if (coverage == 0.0) discard;
+				}
+				vec4 view = InvProjMat * vec4(ofTexCoord * 2.0 - 1.0, 0.0, 1.0);
+				vec3 direction = normalize(mat3(InvViewMat) * view.xyz);
+				skyColor = computeSkybox(int(SceneTime.w), SceneTime.x, direction);
+				skyColor.a = SceneTime.y * (isSky ? skyColor.a : coverage);
+			}
+			""";
+
 	private static final ShaderSource SOURCE = GraphicsApi.source((id, type) -> {
 		if (type == ShaderType.FRAGMENT) {
+			if (SKY_FRAGMENT_ID.equals(id)) {
+				return SKY;
+			}
+
 			if (FOG_FRAGMENT_ID.equals(id)) {
 				return FOG;
 			}
@@ -414,6 +436,7 @@ final class WynncraftOverlay {
 
 	private final String swapLabel;
 
+	private final java.util.Map<GpuFormat, RenderPipeline> skyPipelines = new java.util.HashMap<>();
 	private RenderPipeline fogPipeline;
 	private RenderPipeline scenePipeline;
 	private RenderPipeline transitionPipeline;
@@ -457,6 +480,7 @@ final class WynncraftOverlay {
 	 */
 	void draw(CommandEncoder encoder, GpuDevice device, GpuBuffer quad, GpuTextureView colour,
 			GpuTextureView scene, GpuTextureView opaque, WorldState world) {
+		var transition = WynncraftTransition.consume();
 		if (this.refused || quad == null || colour == null) {
 			return;
 		}
@@ -466,14 +490,11 @@ final class WynncraftOverlay {
 		// and the fade out runs on the frames after the woods are gone, which draw nothing else.
 		rampFog(WynncraftMist.active());
 
-		boolean wantsFog = WynncraftMist.active() && scene != null && opaque != null
+		boolean wantsFog = scene != null && opaque != null
 				&& this.fogOpacity > 0.001F;
 
-		// The sky's own gate, and both halves of it are needed: an identity with no fade behind it
-		// has not arrived, and a fade with no identity behind it is a sky that has left.
-		boolean wantsScene = WynncraftSky.id() > 0 && WynncraftSky.fade() > 0.001F && scene != null
-				&& opaque != null;
-		boolean wantsTransition = WynncraftTransition.consume();
+		boolean wantsScene = WynncraftSky.shouldTintScene() && scene != null && opaque != null;
+		boolean wantsTransition = transition != null && transition.progress() > 0.001F;
 		if (!wantsFog && !wantsScene && !wantsTransition) {
 			return;
 		}
@@ -507,7 +528,7 @@ final class WynncraftOverlay {
 				copyPicture(encoder, colour, width, height);
 			}
 
-			drawTransition(encoder, device, quad, colour, world, width, height);
+			drawTransition(encoder, device, quad, colour, world, width, height, transition);
 		}
 	}
 
@@ -528,6 +549,53 @@ final class WynncraftOverlay {
 	 * two, and the floor of five hundred and twelve is its own too: a small render distance under a
 	 * large sky is the case it keeps the tint off the player's face for.
 	 */
+	private void writeSceneBlock(WorldState world, float opacity) {
+		float skyTime = world.animationTicks() / 24000.0F * 12000.0F;
+		float farPlane = Math.max(Math.max(world.dhFarPlane(), world.far() * 1.5F), 512.0F);
+
+		this.sceneBlock.rotate();
+		try (GpuBufferSlice.MappedView view = this.sceneBlock.currentBuffer().map(false, true)) {
+			Std140Builder.intoBuffer(view.data())
+					.putMat4f(world.gbufferProjectionInverse())
+					.putMat4f(world.gbufferModelViewInverse())
+					.putVec4(skyTime, opacity, farPlane, WynncraftSky.id());
+		}
+	}
+
+	void paintSky(GpuDevice device, GpuBuffer quad, ColorTargets targets, GpuTextureView colour, GpuTextureView opaque,
+			GpuTextureView lod, WorldState world) {
+		WynncraftSky.setPaintedId(0);
+		if (WynncraftSky.id() == 0 || WynncraftSky.fade() <= 0.001F || this.refused
+				|| colour == null || opaque == null || quad == null || !ensure(colour.getWidth(0), colour.getHeight(0))) {
+			return;
+		}
+		GpuFormat format = colour.texture().getFormat();
+		RenderPipeline skyPipeline = this.skyPipelines.computeIfAbsent(format, key -> RenderPipeline.builder()
+					.withLocation(Identifier.fromNamespaceAndPath(Vitrail.MOD_ID, "pipeline/wynn_sky"))
+					.withVertexShader(VERTEX_ID).withFragmentShader(SKY_FRAGMENT_ID)
+					.withBindGroupLayout(BindGroupLayouts.GLOBALS)
+					.withBindGroupLayout(GraphicsApi.blockAndSamplers(SCENE_BLOCK, OPAQUE_DEPTH, "DepthLod"))
+					.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX)
+					.withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT),
+							format, ColorTargetState.WRITE_COLOR))
+					.withPrimitiveTopology(PrimitiveTopology.TRIANGLES).withCull(false).build());
+		if (!GraphicsApi.valid(GraphicsApi.compile(device, skyPipeline, SOURCE))) {
+			return;
+		}
+		writeSceneBlock(world, WynncraftSky.fade());
+		try (RenderPass pass = device.createCommandEncoder().createRenderPass(() -> LABEL + " sky",
+				colour, targets.takeClear(colour))) {
+			GraphicsApi.setPipeline(pass, skyPipeline);
+			RenderSystem.bindDefaultUniforms(pass);
+			pass.setUniform(SCENE_BLOCK, this.sceneBlock.currentBuffer());
+			pass.setVertexBuffer(0, quad.slice());
+			bindClamped(pass, OPAQUE_DEPTH, opaque);
+			bindClamped(pass, "DepthLod", lod == null ? opaque : lod);
+			pass.draw(VERTICES, 1, 0, 0);
+			WynncraftSky.setPaintedId(WynncraftSky.id());
+		}
+	}
+
 	private void drawScene(CommandEncoder encoder, GpuDevice device, GpuBuffer quad,
 			GpuTextureView colour, GpuTextureView scene, GpuTextureView opaque, WorldState world) {
 		RenderPipeline compiled = scenePipeline(device);
@@ -539,16 +607,7 @@ final class WynncraftOverlay {
 		// expression the dome is drawn with (WynncraftPatch.DAY_CLOCK) and has to be: a fog that
 		// headed towards a sky an hour away from the one behind it would show as a seam at the
 		// horizon. The partial tick is in both.
-		float skyTime = (world.worldTime() + world.partialTick()) / 24000.0F * 12000.0F;
-		float farPlane = Math.max(Math.max(world.dhFarPlane(), world.far() * 1.5F), 512.0F);
-
-		this.sceneBlock.rotate();
-		try (GpuBufferSlice.MappedView view = this.sceneBlock.currentBuffer().map(false, true)) {
-			Std140Builder.intoBuffer(view.data())
-					.putMat4f(world.gbufferProjectionInverse())
-					.putMat4f(world.gbufferModelViewInverse())
-					.putVec4(skyTime, WynncraftSky.fade(), farPlane, WynncraftSky.id());
-		}
+		writeSceneBlock(world, WynncraftSky.fade() * WynnOption.DARK.scale());
 
 		try (RenderPass pass = encoder.createRenderPass(() -> LABEL + " scene", colour,
 				Optional.empty())) {
@@ -575,14 +634,15 @@ final class WynncraftOverlay {
 		// the range up towards one so a fraction of the fog keeps more of its presence than the
 		// number suggests ({@code IrisRenderingPipeline.java:1700-1701}). At the hundred itself
 		// the complement is nought and the curve is one, which is the full fog.
-		float density = 1.0F - (float) Math.pow(1.0F - 1.0F, 1.5F);
+		float density = 1.0F - (float) Math.pow(1.0F - WynnOption.DENSITY.scale(), 1.5F);
 
 		this.fogBlock.rotate();
 		try (GpuBufferSlice.MappedView view =
 				this.fogBlock.currentBuffer().map(false, true)) {
 			Std140Builder.intoBuffer(view.data())
 					.putMat4f(world.gbufferProjectionInverse())
-					.putVec4(world.fogR(), world.fogG(), world.fogB(), 1.0F)
+					.putVec4(world.fogR() + WynncraftMist.correction().x(), world.fogG() + WynncraftMist.correction().y(),
+							world.fogB() + WynncraftMist.correction().z(), 1.0F)
 					.putVec4(WynncraftMist.start(), WynncraftMist.end(), this.fogOpacity, density);
 		}
 
@@ -600,7 +660,7 @@ final class WynncraftOverlay {
 	}
 
 	private void drawTransition(CommandEncoder encoder, GpuDevice device, GpuBuffer quad,
-			GpuTextureView colour, WorldState world, int width, int height) {
+			GpuTextureView colour, WorldState world, int width, int height, WynncraftTransition.Detection transition) {
 		RenderPipeline compiled = transitionPipeline(device);
 		if (compiled == null) {
 			return;
@@ -609,8 +669,8 @@ final class WynncraftOverlay {
 		// The day as a fraction, which is the clock WynnIris drives its transitions on
 		// ({@code computeWynncraftGameTime}): the noise advances with the world and not with the
 		// frame rate, and a world standing still has a pattern standing still with it.
-		float day = (world.worldTime() + world.partialTick()) / 24000.0F;
-		int rgb = WynncraftTransition.colour();
+		float day = world.animationTicks() / 24000.0F;
+		int rgb = transition.colour();
 
 		this.transitionBlock.rotate();
 		try (GpuBufferSlice.MappedView view =
@@ -618,7 +678,7 @@ final class WynncraftOverlay {
 			Std140Builder.intoBuffer(view.data())
 					.putVec4(((rgb >> 16) & 0xFF) / 255.0F, ((rgb >> 8) & 0xFF) / 255.0F,
 							(rgb & 0xFF) / 255.0F, 1.0F)
-					.putVec4(day, WynncraftTransition.progress(), WynncraftTransition.kind(), 0.0F)
+					.putVec4(day, transition.progress(), transition.kind(), 0.0F)
 					.putVec4(width, height, 0.0F, 0.0F);
 		}
 
@@ -632,7 +692,6 @@ final class WynncraftOverlay {
 			pass.draw(VERTICES, 1, 0, 0);
 		}
 
-		WynncraftTransition.taken();
 	}
 
 	private void bindClamped(RenderPass pass, String name, GpuTextureView view) {
@@ -726,8 +785,7 @@ final class WynncraftOverlay {
 					.withVertexShader(VERTEX_ID)
 					.withFragmentShader(SCENE_FRAGMENT_ID)
 					.withBindGroupLayout(BindGroupLayouts.GLOBALS)
-					.withBindGroupLayout(GraphicsApi.blockAndSamplers(SCENE_BLOCK, COLOUR,
-							SCENE_DEPTH, OPAQUE_DEPTH))
+					.withBindGroupLayout(GraphicsApi.blockAndSamplers(SCENE_BLOCK, COLOUR, SCENE_DEPTH, OPAQUE_DEPTH))
 					.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX)
 					.withColorTargetState(new ColorTargetState(Optional.empty(),
 							GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_COLOR))
@@ -769,6 +827,7 @@ final class WynncraftOverlay {
 
 	/** Frees the swap and the three blocks. Called where the chain releases its own. */
 	void release() {
+		WynncraftSky.setPaintedId(0);
 		if (this.swap != null) {
 			this.swap.close();
 			this.swap = null;

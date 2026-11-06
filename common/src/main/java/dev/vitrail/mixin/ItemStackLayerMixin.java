@@ -1,6 +1,14 @@
 package dev.vitrail.mixin;
 
+import dev.vitrail.mixin.access.ItemContextAccessor;
+import dev.vitrail.mixin.access.MountSkullAccessor;
+import dev.wynnvitrail.WynnOption;
+import dev.wynnvitrail.WynncraftMountArmorOverlay;
 import dev.wynnvitrail.WynncraftSettings;
+import net.minecraft.client.renderer.PlayerSkinRenderCache;
+import net.minecraft.client.renderer.special.SpecialModelRenderer;
+import net.minecraft.world.item.ItemDisplayContext;
+import org.spongepowered.asm.mixin.Final;
 import dev.wynnvitrail.WynncraftSkyMarking;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -85,6 +93,23 @@ public abstract class ItemStackLayerMixin {
 			if (WynncraftSkyMarking.read(quad, deltaY)) {
 				return;
 			}
+		}
+	}
+
+	@Shadow @Final private ItemStackRenderState this$0;
+	@Shadow private SpecialModelRenderer<?> specialRenderer;
+	@Shadow private Object argumentForSpecialRendering;
+
+	@Inject(method = "submit", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;popPose()V"))
+	private void vitrail$mount(PoseStack pose, SubmitNodeCollector collector, int light, int overlay,
+			int outline, CallbackInfo ci) {
+		if (!WynnOption.MOUNT.enabled()) return;
+		ItemDisplayContext context = ((ItemContextAccessor) this.this$0).vitrail$displayContext();
+		if (specialRenderer instanceof MountSkullAccessor skull) {
+			WynncraftMountArmorOverlay.submitPlayerHeadOverlays((PlayerSkinRenderCache.RenderInfo) argumentForSpecialRendering,
+					context, pose, collector, light, skull.vitrail$modelBase());
+		} else if (specialRenderer == null && quads != null) {
+			WynncraftMountArmorOverlay.submitItemLayerOverlays(pose, collector, light, overlay, quads.all(), context);
 		}
 	}
 }

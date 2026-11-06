@@ -392,6 +392,8 @@ public final class PackChain {
 	 * the clear living in the open that refusal skipped.
 	 */
 	private boolean redirected;
+	private boolean reseedPhotonClouds;
+	private boolean maskAmbienceSwitch = dev.wynnvitrail.ambience.WynnAmbience.switching();
 
 	PackChain(PackProgram.Chain chain, PackValues values, String world, boolean seedEnabled,
 			OpenedPack opened, Path packPath, Map<String, OptionValue> chosen, String profile) {
@@ -404,6 +406,8 @@ public final class PackChain {
 		this.chain = chain;
 		this.values = values;
 		this.packPath = packPath;
+		this.reseedPhotonClouds = dev.wynnvitrail.ambience.WynnAmbience.active() != null
+				&& packPath.getFileName().toString().toLowerCase(java.util.Locale.ROOT).contains("photon");
 		this.chosen = Map.copyOf(chosen);
 		this.profile = profile;
 		this.world = world;
@@ -1124,6 +1128,11 @@ public final class PackChain {
 		return disabled || chain == null ? null : chain.entities;
 	}
 
+	public static boolean supportsWynnVfx() {
+		EntityDraw draw = entities();
+		return draw != null && draw.wynnVfx;
+	}
+
 	/** The same, for the clouds. */
 	static CloudDraw clouds() {
 		PackChain chain = active;
@@ -1206,6 +1215,12 @@ public final class PackChain {
 		WorldState world = this.values.world();
 		this.fogClear.set(world.fogR(), world.fogG(), world.fogB(), 1.0F);
 		this.targets.clear(device.createCommandEncoder(), this.fogClear);
+		if (this.reseedPhotonClouds) {
+			var encoder = device.createCommandEncoder();
+			this.targets.resetCloudHistory(encoder, 11, new org.joml.Vector4f(0F, 0F, 0F, 1F));
+			this.targets.resetCloudHistory(encoder, 12, new org.joml.Vector4f(65504F, 0F, 0F, 0F));
+			this.reseedPhotonClouds = false;
+		}
 		// After the clear and not before. The clear is what pays the debt a fresh allocation owes,
 		// and it is the one call here that can throw; raised first, the second call of the same frame
 		// found the frame opened and skipped the clear it never got, and the debt died with the
@@ -1283,6 +1298,8 @@ public final class PackChain {
 			chain.release();
 		}
 
+		ColorTargets.closeAmbienceSurfaces();
+		AmbienceFrameHistory.close();
 		FamilyWarmup.awaitAll();
 
 		// The far terrain's two corner rings, the one-texel constants and the comparison sampler
@@ -1317,6 +1334,10 @@ public final class PackChain {
 	 * appears on pays once.
 	 */
 	public static void leaveWorld() {
+		dev.wynnvitrail.WynncraftTransition.consume();
+		AmbienceFrameHistory.close();
+		ColorTargets.closeAmbienceSurfaces();
+		dev.wynnvitrail.ambience.WynnAmbience.leaveWorld();
 		PackChain chain = active;
 		if (chain == null) {
 			return;
@@ -1724,9 +1745,12 @@ public final class PackChain {
 	 * translucent chunk group, which is still ahead. Every reader of the early half is downstream
 	 * too, the deferred stage first of all.
 	 * <p>
-	 * Only when a pack is being drawn, and only on the frames the pack really drew the far terrain:
-	 * on every other frame the {@code dhDepthTex} names keep answering the far plane, and every
-	 * Distant Horizons branch of the pack stays shut, exactly as without the mod.
+	 * Only when a pack is being drawn, and taken only on the frames the pack really drew the far
+	 * terrain. On a frame it drew none the {@code dhDepthTex} names answer the far plane, and every
+	 * Distant Horizons branch of the pack stays shut: out of the one texel white where the pack was
+	 * never told of the far terrain, as without the mod, and out of the same pair of images, filled
+	 * with the far plane, where it was told and there is simply nothing of it in view, as DH's own
+	 * emptied image answers under Iris.
 	 */
 	public static void takeDistantDepth() {
 		PackChain chain = active;
@@ -1743,14 +1767,31 @@ public final class PackChain {
 		// what this engine draws with the door shut.
 		DhLods.install();
 
+		// And DH's own clouds with it, on the pack's word and on nothing else: they are drawn whether
+		// or not the far terrain is taken over, and handed back with the pack in release.
+		DhLods.clouds(chain.values.avoidsDhClouds());
+
 		GpuTextureView served = chain.distant.served();
-		if (served == null) {
+		if (served == null && !chain.readsDistantDepth()) {
 			return;
 		}
 
 		// Caught like every other point the game calls this engine back at: an exception here reaches
 		// the game through an event handler and comes back on the very next frame.
 		try {
+			if (served == null) {
+				// Nothing of the far terrain in view, which is not the far terrain being absent: the
+				// pack was told it is there and reads its depth by texel. PackDepth.takeDistantNothing
+				// says why the one texel white will not do for that.
+				RenderTarget main = minecraft.gameRenderer.mainRenderTarget();
+				if (main != null) {
+					chain.targets.depth().takeDistantNothing(device.createCommandEncoder(), main.width,
+							main.height);
+				}
+
+				return;
+			}
+
 			chain.targets.depth().takeDistantOpaque(device.createCommandEncoder(), device,
 					chain.quad(device), served, served.getWidth(0), served.getHeight(0));
 		} catch (GpuDeviceLossException e) {
@@ -1781,6 +1822,16 @@ public final class PackChain {
 	/** The same question for the depth taken before the hand, which a pack reads as depthtex2. */
 	private boolean mayReadPreHandDepth() {
 		return this.chain.mentions().maybe("depthtex2");
+	}
+
+	/**
+	 * Whether a frame with no far terrain in view owes this pack a far plane the size of the
+	 * screen: it was handed {@code DISTANT_HORIZONS}, so its distant roads are compiled in, and some
+	 * source of it names the far terrain's depth. Off the pack's text for the reason the two above
+	 * are.
+	 */
+	private boolean readsDistantDepth() {
+		return PackDefines.distantHorizons() && this.chain.mentions().maybe("dhDepthTex");
 	}
 
 	/**
@@ -1940,7 +1991,9 @@ public final class PackChain {
 	/**
 	 * Redirects the game's translucent features, the player's body among them, into the layer that
 	 * will hand them to the pack's image. Called once the early half has run, and undone by
-	 * {@link #closeFeatures()}: the pair brackets exactly the game's {@code executeTranslucent}.
+	 * {@link #closeFeatures()}: the pair brackets exactly the game's {@code executeTranslucent}. The
+	 * see-through phase 26.3 draws after the terrain is not bracketed by it, its text rows being
+	 * the entity door's and needing the window alone.
 	 * <p>
 	 * The switch is the game's own, the one it throws around its always-on-top features. The colour
 	 * goes to the layer; the depth keeps pointing at the world's, so the redirected draws still
@@ -2336,6 +2389,19 @@ public final class PackChain {
 		drawRange(device, ready, world, end, this.targets.depth().opaque(),
 				this.targets.depth().distantOpaque(), true, Cut.BEFORE_TRANSLUCENTS);
 
+		if (dev.wynnvitrail.WynncraftSky.id() > 0) {
+			GpuTextureView sceneColour = this.features == null
+					? (holdsIntegers(0) ? null : this.targets.view(0, this.targets.schedule().sideAfterDeferred(0)))
+					: this.targets.view(this.features.into().target(), this.features.into().side());
+			// Native draws still blend onto the main target. Pack draws can use a separate scene attachment.
+			this.wynncraftOverlay.paintSky(device, this.quad, this.targets, ready.mainView(), this.targets.depth().opaque(),
+					this.targets.depth().distantOpaque(), this.values.world());
+			if (sceneColour != null && sceneColour != ready.mainView()) {
+				this.wynncraftOverlay.paintSky(device, this.quad, this.targets, sceneColour, this.targets.depth().opaque(),
+						this.targets.depth().distantOpaque(), this.values.world());
+			}
+		}
+
 		// The first of the frame's two takes, for the translucent passes drawn inside the game's
 		// features window that opens right after this: the translucent half of the entities reads
 		// the opaque world as the deferreds and the seed left it, which is what stands here.
@@ -2424,6 +2490,8 @@ public final class PackChain {
 		this.wynncraftOverlay.draw(device.createCommandEncoder(), device, this.quad,
 				ready.mainView(), this.targets.depth().scene(), this.targets.depth().opaque(),
 				this.values.world());
+		AmbienceFrameHistory.present(device, ready.mainView(), this.maskAmbienceSwitch);
+		this.maskAmbienceSwitch = false;
 
 		// Outside any pass, and after the last one. Only the targets the pack keeps between frames
 		// and that the chain left on the far half are copied: the next frame walks from an empty

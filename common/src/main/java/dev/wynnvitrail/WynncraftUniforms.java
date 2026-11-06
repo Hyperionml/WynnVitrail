@@ -39,6 +39,12 @@ public final class WynncraftUniforms {
 	 * @param builder the table being assembled, whose {@code add} refuses a name already in it
 	 */
 	public static void register(UniformCatalog.Builder builder) {
+		builder.add("wynnGlintBrightness", UniformShape.FLOAT, (world, out) -> out.set(WynnOption.GLINT.scale()));
+		builder.add("wynnTintBrightness", UniformShape.FLOAT, (world, out) -> out.set(WynnOption.TINT.scale()));
+		builder.add("wynnEntityEmissivity", UniformShape.FLOAT, (world, out) -> out.set(WynnOption.EMISSIVE.scale()));
+		builder.add(WynncraftPatch.SKY_PRIMARY, UniformShape.INT, (world, out) -> out.set(WynncraftSky.paintedId()));
+		builder.add(WynncraftPatch.SKY_RECENT, UniformShape.INT, (world, out) ->
+				out.set(WynncraftSky.recentId()));
 		builder.add(WynncraftPatch.ENTITY_BOOST, UniformShape.FLOAT, (world, out) ->
 				out.set(WynncraftSky.entityBoost(world.nightVision(), hand(world))));
 	}

@@ -41,7 +41,7 @@ public final class TimeValues {
 		// WynncraftPatch.DAY_CLOCK carries the whole argument, and the transitions this engine draws
 		// over the finished picture already take the same fraction on the Java side.
 		builder.add(WynncraftPatch.DAY_CLOCK, UniformShape.FLOAT,
-				(world, out) -> out.set((float) world.worldTime() + world.partialTick()));
+				(world, out) -> out.set(world.animationTicks()));
 
 		// The real world clock, which packs use for a seasonal tint or a date joke. Read once a
 		// frame like everything else here: read per source, two passes of one frame either side of

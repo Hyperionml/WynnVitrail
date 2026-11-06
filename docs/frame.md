@@ -209,10 +209,18 @@ program takes a different one, with a fault of its own described in
 **A pixel the pack's own geometry has covered must not be seeded over.** That is what the coverage
 mask is for, and it carries a **depth** rather than a flag: a program of the pack drawn before the
 seed writes into it the value it handed the depth attachment, and the seed compares that with
-the world's depth as it stands. A pixel nothing has been drawn over since compares equal and is the
+the world's depth as it stands. The sky is the one exception: it hands the attachment nothing, so
+it writes the far plane, which is what the attachment still holds under it. A pixel nothing has been drawn over since compares equal and is the
 pack's; a pixel the game has drawn a feature onto compares closer and is the seed's. Where the pack
 wrote nothing at all the mask holds a value outside zero to one, which every real depth is in front
 of, so those pixels take the game's picture through the same comparison.
+
+"Equal" allows a few units in the last place, and it has to. The mask is filled from what the
+fragment stage sees and the attachment from what the rasteriser stores, and on a Mac the two part by
+one unit on some pixels of a sloped surface, in a pattern that repeats with the GPU's 32 pixel tile.
+Compared strictly, each of those pixels read as covered by the game: Photon's held item, whose
+first draw buffer is a packed gbuffer, carried a light dash on every tile boundary while the player
+walked. A feature the game really draws in front stands millions of times further off than that.
 
 That is one comparison for two questions, and the second one is what a flag could not answer. The
 game still draws pieces of its own in front of the pack's geometry, and they have to arrive; the
@@ -302,6 +310,13 @@ which is drawn there), since they land in the game's target and the pack's final
 They are not lost: the engine redirects the game's colour output for the length of that phase and
 composes what it catches onto the pack's target afterwards. It is a second full-screen layer,
 bracketing one phase rather than standing at one seam.
+
+Minecraft 26.3 draws one more thing late: the text it shows through a wall, the name of a player
+standing behind one, in a call of its own after the translucent terrain and the outlines, and that
+text would land in the game's target like the rest. It takes no second layer. Text is a family the
+entity door serves with the pack's own program, as Iris does, so the engine only opens that door's
+window around the call, and the name reaches the pack's image the way the name of a player in the
+open does, with nothing cleared or composed for it.
 
 ### The hand is the one family the engine has to move rather than intercept
 

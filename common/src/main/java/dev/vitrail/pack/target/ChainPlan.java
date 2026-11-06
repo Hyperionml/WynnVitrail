@@ -165,6 +165,18 @@ public final class ChainPlan {
 					// Not counted, on the hand's argument: a block moves where a piston pushes or sand
 					// falls, a per frame answer no per place map may carry.
 					new NamedProgram("gbuffers_block", true, NOT_EVERYWHERE),
+					// The two blending names on the NEAR side, which 26.3 reaches and 26.2 never does:
+					// that game forces a banner's pattern layers among the solid features
+					// (render/GamePipelines.solidPhase of 26.3), so the block row and the entity row
+					// of the pattern are drawn before the deferreds with their translucent program, as
+					// Iris draws them. Without these two the early piece resolved no attachment and
+					// wrote its one output on the game's target under the seed, and every banner drew
+					// as white cloth.
+					//
+					// Not counted, on the hand's argument: a banner stands where somebody put one, a
+					// per frame answer no per place map may carry.
+					new NamedProgram("gbuffers_block_translucent", false, NOT_EVERYWHERE),
+					new NamedProgram("gbuffers_entities_translucent", false, NOT_EVERYWHERE),
 					// The OPAQUE entity name on the far side, which reads like a contradiction and is
 					// the energy swirl over a charged creeper: Iris pins that row to ENTITIES_CUTOUT
 					// outright (pipeline/IrisPipelines.java:60) while the game blends it, so it is
@@ -191,13 +203,21 @@ public final class ChainPlan {
 					// targets as written in every place a plan is built for, which is every place
 					// none of the six is standing.
 					new NamedProgram("gbuffers_spidereyes", true, NOT_EVERYWHERE),
-					// The overlay over a block being mined, drawn among the translucent features
-					// beside the eyes and on the same side of the stage. Left out of this list, its
-					// family drew one output onto the game's cleared target, and the multiply the
-					// overlay blends with came out opaque black over every crack.
+					// The overlay over a block being mined, which straddles the stage on 26.3 for the
+					// glint's reason: what it lies on decides the half. That game files the crack
+					// over a translucent block among the translucent features, beside the eyes, and
+					// the crack over every other block among the SOLID ones
+					// (SubmitNodeCollection.submitBreakingBlockModel and submitCrumblingOverlay), so
+					// both sides are walked. Left out on the far side, its family drew one output
+					// onto the game's cleared target, and the multiply the overlay blends with came
+					// out opaque black over every crack. Left out on the near side, the early piece
+					// wrote its one output onto the game's own target before the scene seed, and a
+					// crack writes no depth, so the seed's cut never carried it in: the block broke
+					// with no crack on it at all.
 					//
 					// Not counted, on the hand's argument: a crack is drawn where somebody is mining
 					// a block, which is a per frame answer no per place map may carry.
+					new NamedProgram("gbuffers_damagedblock", false, NOT_EVERYWHERE),
 					new NamedProgram("gbuffers_damagedblock", true, NOT_EVERYWHERE),
 					// The game's lines, the block outline first among them, drawn among the
 					// translucent features beside the overlay and on the same side of the stage.

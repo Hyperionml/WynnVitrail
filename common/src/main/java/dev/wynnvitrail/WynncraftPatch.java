@@ -106,10 +106,10 @@ public final class WynncraftPatch {
 	 * paints only one, so the noughts cost nothing here; {@link WynncraftSkybox} carries the whole
 	 * argument.
 	 */
-	static final String SKY_PRIMARY = "wynnSkyPrimaryId";
+	public static final String SKY_PRIMARY = "wynnSkyPrimaryId";
 
 	/** @see #SKY_PRIMARY */
-	static final String SKY_RECENT = "wynnSkyRecentId";
+	public static final String SKY_RECENT = "wynnSkyRecentId";
 
 	/**
 	 * The uniform that lifts an entity out of a scene one of the dark skies has darkened.
@@ -335,7 +335,20 @@ public final class WynncraftPatch {
 		}
 
 		if (applies(stage, inputs)) {
+			lines.add("bool wynnTintAppliedEarly = false;");
 			lines.add("// WynnVitrail: the Wynncraft glint effects. See WynncraftGlint.");
+			lines.add("vec3 wynnEffectTint(int id) { switch (id) { " +
+				"case 15: return vec3(80,  130, 230) / 255.0; " +
+				"case 16: return vec3(30,  230, 130) / 255.0; " +
+				"case 17: return vec3(235, 70,  70 ) / 255.0; " +
+				"case 18: return vec3(100, 190, 190) / 255.0; " +
+				"case 19: return vec3(250, 120, 20 ) / 255.0; " +
+				"case 20: return vec3(50,  50,  50 ) / 255.0; " +
+				"case 21: return vec3(250, 230, 230) / 255.0; " +
+				"case 22: return vec3(255, 150, 200) / 255.0; " +
+				"case 23: return vec3(200, 60,  230) / 255.0; " +
+				"case 24: return vec3(240, 240, 80 ) / 255.0; " +
+				"default: return vec3(1.0); } }");
 			for (String helper : WynncraftGlint.HELPERS) {
 				lines.addAll(helper.lines().toList());
 			}
@@ -492,6 +505,16 @@ public final class WynncraftPatch {
 	 */
 	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output,
 			String second, boolean vlAlbedo, String sampler) {
+		return epilogue(stage, inputs, output, second, vlAlbedo, sampler, false);
+	}
+
+	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output,
+			String second, boolean vlAlbedo, String sampler, boolean packedLight) {
+		return epilogue(stage, inputs, output, second, vlAlbedo, sampler, packedLight, false, false);
+	}
+
+	public static String epilogue(ProgramStage stage, VertexInputs inputs, String output, String second,
+			boolean vlAlbedo, String sampler, boolean packedLight, boolean deferred, boolean premultiplied) {
 		if (!applies(stage, inputs)) {
 			return "";
 		}
@@ -511,9 +534,14 @@ public final class WynncraftPatch {
 		// guards on it wherever the sky ran and wherever it did not: a program with no diffuse
 		// sampler is refused the sky and still owes the fade, and a second declaration inside the
 		// branch would be one the block already holds.
-		statements.append("bool wynnSkyApplied = false; ");
 		if (sampler != null) {
-			statements.append(skybox(sampler, output));
+            statements.append("if (wynnMountArmor(").append(colour).append(") && texture(")
+                    .append(sampler).append(", ").append(GlslTranslator.ENTITY_VERTEX_UV)
+                    .append(").a <= 0.01) { discard; } ");
+        }
+		statements.append("bool wynnSkyApplied = false; ");
+		if (sampler != null || deferred) {
+			statements.append(skybox(sampler, output, deferred, premultiplied));
 		}
 
 		// The two decoded numbers, read whatever became of the sampler: the item tint below asks
@@ -521,6 +549,7 @@ public final class WynncraftPatch {
 		// texture is still told which limb of the question it is on.
 		statements.append("int wynnEffect = ").append(WynncraftSignals.GLINT_NAME).append("(")
 				.append(colour).append("); ");
+		statements.append("if (currentRenderedItemId >= 64001 && currentRenderedItemId <= 64032) { wynnEffect = currentRenderedItemId - 64000; } ");
 		statements.append("int wynnLevel = ").append(WynncraftSignals.TRANSLUCENCY_NAME).append("(")
 				.append(colour).append("); ");
 
@@ -532,7 +561,7 @@ public final class WynncraftPatch {
 		// and minus one divided by the radix is nought where six five five three five divided by it
 		// is three - so the one spelling that keeps the two engines answering alike on a draw
 		// nothing mapped is the one that puts the minus one back before it divides.
-		statements.append("int wynnInfoFlags = (blockEntityId == 65535 ? -1 : blockEntityId) / 16384; ");
+		statements.append("int wynnInfoFlags = int(round(wynnItemFlags)); ");
 		statements.append("bool wynnSkipTint = wynnInfoFlags == 1 || wynnInfoFlags == 3; ");
 		statements.append("bool wynnSkipLights = wynnInfoFlags >= 2; ");
 
@@ -560,9 +589,12 @@ public final class WynncraftPatch {
 			statements.append(glint(sampler, output));
 		}
 
+		if (premultiplied) statements.append("float wynnOldAlpha = ").append(output).append(".a; ");
 		statements.append("if (wynnLevel > 0) { ").append(output).append(".a = min(").append(output)
 				.append(".a, ").append(WynncraftSignals.ALPHA_NAME).append("(wynnLevel)); } ");
 
+		if (premultiplied) statements.append("if (wynnLevel > 0 && wynnOldAlpha > 0.0) ").append(output)
+				.append(".rgb *= ").append(output).append(".a / wynnOldAlpha; ");
 		statements.append(itemTint(output));
 
 		// The fade, spent after the reduction and before the lift, which is WynnIris's own order
@@ -587,9 +619,12 @@ public final class WynncraftPatch {
 		// to half again its own - is a change to a colour no pack produced. The second is the mesh's
 		// own flags, and what it is for is an art the server has already lit itself: a lift there
 		// would be the second helping of a brightness that was painted on.
+		if (packedLight) {
+			statements.append("if (wynnSkyApplied) wynnLightMode = 2; ");
+		}
 		statements.append("if (!wynnSkyApplied && !wynnSkipLights) ")
 				.append(sampler != null
-						? WynncraftShading.lightTweaks(output, sampler, "wynnEffect", ENTITY_BOOST)
+						? WynncraftShading.lightTweaks(output, sampler, "wynnEffect", ENTITY_BOOST, packedLight)
 						: WynncraftShading.skyCompensation(output, ENTITY_BOOST));
 
 		if (second != null && vlAlbedo) {
@@ -722,14 +757,13 @@ public final class WynncraftPatch {
 	 * @param output  the name the pack's first colour output ended up with
 	 * @return the statements, which run before every other step of the application
 	 */
-	private static String skybox(String sampler, String output) {
+	private static String skybox(String sampler, String output, boolean deferred, boolean premultiplied) {
 		StringBuilder code = new StringBuilder();
 
-		// The two ids, at WynnIris's own value for having decided on neither. See the method
-		// comment: this engine has no second sky for them to keep out of the way.
-		code.append("const int ").append(SKY_PRIMARY).append(" = 0; const int ")
-				.append(SKY_RECENT).append(" = 0; ");
-		code.append("int wynnSkyId = ").append(WynncraftSkybox.SIGNAL_NAME).append("(")
+		if (deferred) {
+			code.append("ivec4 wynnSignal = ivec4(round(").append(output).append(" * 255.0)); ")
+					.append("int wynnSkyId = wynnSignal.g == 251 && wynnSignal.a == 254 && wynnSignal.b <= 7 ? wynnSignal.b : 0; ");
+		} else code.append("int wynnSkyId = ").append(WynncraftSkybox.SIGNAL_NAME).append("(")
 				.append(sampler).append(", ").append(GlslTranslator.ENTITY_VERTEX_UV).append("); ");
 		code.append("if (wynnSkyId > 0) { ");
 		code.append("if (wynnSkyId == ").append(SKY_PRIMARY).append(" || wynnSkyId == ")
@@ -739,6 +773,7 @@ public final class WynncraftPatch {
 		code.append(output).append(" = ").append(WynncraftSkybox.APPLY_NAME)
 				.append("(wynnSkyId, wynnSkyTime, normalize(")
 				.append(GlslTranslator.ENTITY_VERTEX_POSITION).append(")); ");
+		if (premultiplied) code.append(output).append(".rgb *= ").append(output).append(".a; ");
 		code.append("wynnSkyApplied = true; } ");
 
 		return code.toString();
@@ -797,7 +832,7 @@ public final class WynncraftPatch {
 		String mid = GlslTranslator.ENTITY_VERTEX_MID_TEX;
 
 		StringBuilder code = new StringBuilder();
-		code.append("if (wynnEffect != 0) { ");
+		code.append("if (wynnEffect != 0 && !wynnTintAppliedEarly) { ");
 		code.append("vec2 wynnSize = vec2(textureSize(").append(sampler).append(", 0)); ");
 		code.append("bool wynnAtlas = max(wynnSize.x, wynnSize.y) > 2000.0; ");
 		code.append("vec2 wynnUv = ").append(uv).append("; ");

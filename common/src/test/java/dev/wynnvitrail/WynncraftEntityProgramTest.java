@@ -3,6 +3,7 @@ package dev.wynnvitrail;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static dev.wynnvitrail.ShaderCompileCheck.compile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -200,7 +201,7 @@ class WynncraftEntityProgramTest {
 			// compile.
 			assertTrue(fragment.contains("vec4 wynnApplyGlint(sampler2D wynnTex,"),
 					"the fragment stage has no glint library:\n" + fragment);
-			assertTrue(fragment.contains("const float wynnGlintBrightness = 1.10;"),
+			assertTrue(fragment.contains("float wynnGlintBrightness;"),
 					"the glint's brightness is not the setting it was measured at:\n" + fragment);
 
 			// The number, off the varying and not off a uniform: this is the whole of what the
@@ -266,7 +267,7 @@ class WynncraftEntityProgramTest {
 					"the fragment stage cannot tell an unlit texture:\n" + fragment);
 			assertTrue(fragment.contains("bool wynnIsEmissive(vec4 texel)"),
 					"the fragment stage cannot tell a self-lit texture:\n" + fragment);
-			assertTrue(fragment.contains("const float wynnEntityEmissivity = 1.0;"),
+			assertTrue(fragment.contains("float wynnEntityEmissivity;"),
 					"the lift's strength is not the setting's default:\n" + fragment);
 
 			// The markers themselves, by their numbers, which are the whole of what makes them
@@ -290,7 +291,7 @@ class WynncraftEntityProgramTest {
 							"wynnIsEmissive(wynnShadingTexel) && !(wynnEffect >= 15 && wynnEffect <= 24)"),
 					"the lift is applied where a tint was asked for:\n" + fragment);
 			assertTrue(fragment.contains("mix(ofFragData0.rgb, max(ofFragData0.rgb,"
-							+ " wynnShadingTexel.rgb), wynnEntityEmissivity)"),
+							+ " texture(ofTexture, of_VertexUV).rgb), wynnEntityEmissivity)"),
 					"the lift is not a mix at the setting's strength:\n" + fragment);
 
 			// And the compensation for a sky that darkened the scene, which is the other arm of the
@@ -368,9 +369,9 @@ class WynncraftEntityProgramTest {
 
 			// The decode is read at LOD 0 with a tolerance, because Vitrail's sampler can still let
 			// anisotropy or derivative-based LOD move the marking bytes off their exact values.
-			assertTrue(fragment.contains("vec4 sc = textureLod(tex, uv, 0.0);"),
+			assertTrue(fragment.contains("vec4 sc = texelFetch(tex, clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1), 0);"),
 					"the skybox signal is not forced to LOD 0:\n" + fragment);
-			assertTrue(fragment.contains("abs(sg - 251) <= 1 && abs(sa - 254) <= 1"),
+			assertTrue(fragment.contains("sg == 251 && sa == 254"),
 					"the skybox signal has no tolerance on the marking bytes:\n" + fragment);
 
 			// That the seven skies are all there, by one function of each shape they come in: the
@@ -398,7 +399,7 @@ class WynncraftEntityProgramTest {
 			// constants become uniforms and this is the line that has to change.
 			assertTrue(fragment.contains("int wynnSkyId = wynnSkyboxSignal(ofTexture, of_VertexUV);"),
 					"the sky is decoded and never asked for:\n" + fragment);
-			assertTrue(fragment.contains("const int wynnSkyPrimaryId = 0;"),
+			assertTrue(fragment.contains("int wynnSkyPrimaryId;"),
 					"the primary sky id is not the constant this port has:\n" + fragment);
 			assertTrue(fragment.contains("if (wynnSkyId == wynnSkyPrimaryId"
 							+ " || wynnSkyId == wynnSkyRecentId) { discard; }"),
@@ -481,10 +482,10 @@ class WynncraftEntityProgramTest {
 			assertTrue(vertex.contains("if (of_GameModelView == mat4(1.0)) return;"),
 					"the decode does not ask the draw's own matrix:\n" + vertex);
 
-			// The vertex index the face and the overlay come off, in the OpenGL spelling the
-			// engine's compiler maps at compile time.
-			assertTrue(vertex.contains("int face = (gl_VertexID % 24) / 4;"),
-					"the face is not read off the vertex index:\n" + vertex);
+			// The same face must survive a different base vertex or an independently drawn hat.
+			assertTrue(vertex.contains("vec2 headPixel = MidTexCoord * WYNN_EMOTE_SKIN_SIZE;"));
+			assertTrue(vertex.contains("int overlay = int(headPixel.x >= 32.0);"));
+			assertTrue(vertex.contains("face = 2 + int(headPixel.x / 8.0);"));
 
 			// The redirection, which is the whole of what makes the decode visible to the pack:
 			// its own reads of the position and the coordinate are pointed at the decoded pair,
@@ -549,7 +550,7 @@ class WynncraftEntityProgramTest {
 			// them are read: the tint stands where the flags ask, and the light tweaks stand from
 			// two upwards.
 			assertTrue(fragment.contains(
-					"int wynnInfoFlags = (blockEntityId == 65535 ? -1 : blockEntityId) / 16384;"),
+					"int wynnInfoFlags = int(round(wynnItemFlags));"),
 					"the flags are not read off the identifier:\n" + fragment);
 			assertTrue(fragment.contains(
 							"bool wynnSkipTint = wynnInfoFlags == 1 || wynnInfoFlags == 3;"),
@@ -717,6 +718,31 @@ class WynncraftEntityProgramTest {
 	 * would run twice: once over the variable and once over the output the pack packed it into.
 	 * WynnIris answers the same shape the same way ({@code EntityPatcher.java:1515-1590}).
 	 */
+	@Test
+	void emissivePixelsKeepTheirBlockLightInAPackedGbuffer(@TempDir Path pack) throws IOException {
+		String program = """
+				#version 330
+				uniform sampler2D gtexture;
+				in vec2 texcoord;
+				layout(location = 0) out vec4 surface;
+				float pack_unorm_2x8(vec2 v) {
+				    return dot(round(v * 255.0), vec2(1.0, 256.0)) / 65535.0;
+				}
+				void main() {
+				    vec4 albedo = texture(gtexture, texcoord);
+				    if (albedo.a < 0.1) discard;
+				    surface.rgb = albedo.rgb;
+				    surface.w = pack_unorm_2x8(texcoord);
+				}
+				""";
+		withSwitch(SWITCH, true, () -> {
+			String text = translate(pack, program).get(ProgramStage.FRAGMENT);
+			assertTrue(text.contains("wynnLightMode = 1;"), text);
+			assertTrue(text.contains("wynnCorrectLight(pack_unorm_2x8(texcoord))"), text);
+			assertTrue(text.contains("skyByte * 256 + 255"), text);
+		});
+	}
+
 	@Test
 	void aDeferredPackGetsItsEffectsOnTheAlbedoVariableAtTheOverlayAnchor(@TempDir Path pack)
 			throws IOException {
@@ -955,6 +981,79 @@ class WynncraftEntityProgramTest {
 					"the emote decode was woven into a program that has no limbs:\n" + fragment);
 		});
 	}
+
+	@Test
+    void clampOnlyBackgroundAlpha(@TempDir Path pack) throws IOException {
+        var result = translate(pack, VertexInputs.GLYPH, "gbuffers_entities_translucent#wynn_bg");
+        assertTrue(result.get(ProgramStage.FRAGMENT).contains(".a, wynnBackgroundAlpha)"));
+        assertTrue(result.get(ProgramStage.VERTEX).contains("wynnBackgroundAlpha = Color.a"));
+        result.forEach(ShaderCompileCheck::compile);
+    }
+
+    @Test
+    void compileTextFallbackToSpirv() {
+		var program = dev.vitrail.glsl.ProgramTranslator.translate(WynnGlyphFallback.program(),
+				VertexInputs.GLYPH, "gbuffers_entities_translucent");
+		program.stages().forEach((stage, unit) -> compile(stage, unit.text()));
+	}
+
+	@Test
+	void compilePhotonFallbackToSpirv() {
+		for (boolean premul : new boolean[]{false, true}) {
+			var program = dev.vitrail.glsl.ProgramTranslator.translate(WynnVfx.program(premul),
+					VertexInputs.ENTITY, "gbuffers_entities_translucent");
+			program.stages().forEach((stage, unit) -> compile(stage, unit.text()));
+		}
+	}
+
+	@Test
+	void coreEntityProgramUsesDecodedSkinCoordinates(@TempDir Path pack) throws IOException {
+		var shaders = Files.createDirectories(pack.resolve("shaders"));
+		String name = "gbuffers_entities";
+		Files.writeString(shaders.resolve(name + ".vsh"), """
+				#version 330 core
+				in vec3 vaPosition;
+				in vec2 vaUV0;
+				out vec2 skin;
+				void main() { gl_Position = vec4(vaPosition, 1.0); skin = vaUV0; }
+				""");
+		Files.writeString(shaders.resolve(name + ".fsh"), """
+				#version 330 core
+				in vec2 skin;
+				uniform sampler2D gtexture;
+				out vec4 color;
+				void main() { color = texture(gtexture, skin); }
+				""");
+		var stages = PackProgram.load(pack, name, VertexInputs.ENTITY, Map.of(), "").orElseThrow().program().stages();
+		String vertex = stages.get(ProgramStage.VERTEX).text();
+		assertTrue(vertex.contains("#define vaPosition of_Vertex.xyz"));
+		assertTrue(vertex.contains("#define vaUV0 of_MultiTexCoord0.xy"));
+		stages.forEach((stage, unit) -> compile(stage, unit.text()));
+	}
+
+	@Test
+	void compileForwardTintAndDeferredSkyToSpirv(@TempDir Path pack) throws IOException {
+		String forward = """
+				#version 330
+				uniform sampler2D gtexture;
+				uniform vec4 entityColor;
+				in vec4 texcoord;
+				layout(location=0) out vec4 fragment_color;
+				void main() {
+				    vec4 albedo = texture(gtexture, texcoord.st);
+				    albedo.rgb = mix(albedo.rgb, entityColor.rgb, entityColor.a);
+				    fragment_color = albedo;
+				}
+				""";
+		var result = translate(pack, forward);
+		assertTrue(result.get(ProgramStage.FRAGMENT).contains("wynnTintAppliedEarly = true;"), result.get(ProgramStage.FRAGMENT));
+		result.forEach(ShaderCompileCheck::compile);
+		String deferred = forward.replace("fragment_color = albedo;", "fragment_color.rgb = albedo.rgb;");
+		result = translate(pack, deferred);
+		assertTrue(result.get(ProgramStage.FRAGMENT).contains("ivec4 wynnSignal = ivec4(round(albedo * 255.0))"));
+		result.forEach(ShaderCompileCheck::compile);
+	}
+
 
 	/** What both stages of the program came out as, by stage, over the entity fragment above. */
 	private static Map<ProgramStage, String> translate(Path pack) throws IOException {

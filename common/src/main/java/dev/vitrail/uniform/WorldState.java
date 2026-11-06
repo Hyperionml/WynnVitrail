@@ -60,6 +60,9 @@ public interface WorldState extends ViewSource {
 
 	long worldTime();
 
+	/** Elapsed game ticks modulo one day, including the current frame fraction. */
+	float animationTicks();
+
 	long worldDay();
 
 	int moonPhase();

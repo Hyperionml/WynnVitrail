@@ -221,10 +221,28 @@ public final class EntityVertex {
 		// and for the same reason: a global initialised from a vertex input is not a constant
 		// expression. The rest stay constants, mc_Entity among them, and what the picture is then
 		// wrong about is what the caller has to name in the log.
-		VertexPrologue.globals(used, synthesized, Map.of()).forEach((name, type) -> lines.add(
-				ANSWERED.contains(name)
-						? "#define " + name + " " + answer(name, type)
-						: VertexPrologue.declaration(name, type)));
+		VertexPrologue.globals(used, synthesized, Map.of()).forEach((name, type) -> {
+			// Resolve these through the same macros as compatibility-profile packs.
+			// The Wynncraft wrapper can then substitute both decoded position and skin UV.
+			String source = switch (name) {
+				case "vaPosition" -> "of_Vertex";
+				case "vaUV0" -> "of_MultiTexCoord0";
+				default -> null;
+			};
+			String swizzle = switch (type) {
+				case "float" -> ".x";
+				case "vec2" -> ".xy";
+				case "vec3" -> ".xyz";
+				case "vec4" -> "";
+				default -> null;
+			};
+			if (source != null && swizzle != null) {
+				lines.add("#define " + name + " " + source + swizzle);
+			} else {
+				lines.add(ANSWERED.contains(name) ? "#define " + name + " " + answer(name, type)
+						: VertexPrologue.declaration(name, type));
+			}
+		});
 
 		return List.copyOf(lines);
 	}

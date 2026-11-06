@@ -195,6 +195,6 @@ public final class EntityMeshSerializer implements VertexSerializer {
 		MemoryUtil.memPutShort(into + IDENTIFIERS, entity);
 		MemoryUtil.memPutShort(into + IDENTIFIERS + 2L, blockEntity);
 		MemoryUtil.memPutShort(into + IDENTIFIERS + 4L, item);
-		MemoryUtil.memPutShort(into + IDENTIFIERS + 6L, (short) 0);
+		MemoryUtil.memPutShort(into + IDENTIFIERS + 6L, (short) EntityIdentifiers.itemFlags());
 	}
 }

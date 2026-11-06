@@ -52,7 +52,7 @@ public abstract class ItemStackRenderStateMixin implements DisplayedItem {
 
 	/** The block entity's own number, held for the length of one item and put back after it. */
 	@Unique
-	private int vitrail$heldBlockEntity;
+	private long vitrail$heldIdentifiers;
 
 	@Override
 	public void vitrail$displayedItem(@Nullable Item item, @Nullable Identifier modelId) {
@@ -79,7 +79,12 @@ public abstract class ItemStackRenderStateMixin implements DisplayedItem {
 	@Inject(method = "submit", at = @At("HEAD"), require = 1)
 	private void vitrail$begin(PoseStack poseStack, SubmitNodeCollector collector, int lightCoords,
 			int overlayCoords, int outlineColor, CallbackInfo callback) {
-		this.vitrail$heldBlockEntity = EntityIdentifiers.blockEntity();
+		this.vitrail$heldIdentifiers = EntityIdentifiers.packed();
+		var context = ((dev.vitrail.mixin.access.ItemContextAccessor) this).vitrail$displayContext();
+		EntityIdentifiers.itemFlags(switch (context) {
+			case FIRST_PERSON_LEFT_HAND, FIRST_PERSON_RIGHT_HAND, THIRD_PERSON_LEFT_HAND, THIRD_PERSON_RIGHT_HAND -> 2;
+			default -> 0;
+		});
 
 		Item item = this.vitrail$item;
 		if (item == null) {
@@ -90,6 +95,7 @@ public abstract class ItemStackRenderStateMixin implements DisplayedItem {
 		// Iris carries and it carries it by class.
 		if (item instanceof BlockItem block && !(item instanceof SolidBucketItem)) {
 			EntityIdentifiers.blockEntity(BLOCK_ITEM);
+			if (block.getBlock().defaultBlockState().getLightEmission() > 0) EntityIdentifiers.itemFlags(EntityIdentifiers.itemFlags() | 1);
 			// Nought and not the minus one the table answers everywhere else, which is Iris's own
 			// number here and the only place it departs from its own default: it asks for this one
 			// value with getOrDefault(state, 0) (ItemStackStateLayerMixin.java:57) where every other
@@ -111,7 +117,6 @@ public abstract class ItemStackRenderStateMixin implements DisplayedItem {
 	@Inject(method = "submit", at = @At("RETURN"), require = 1)
 	private void vitrail$end(PoseStack poseStack, SubmitNodeCollector collector, int lightCoords,
 			int overlayCoords, int outlineColor, CallbackInfo callback) {
-		EntityIdentifiers.blockEntity(this.vitrail$heldBlockEntity);
-		EntityIdentifiers.item(0);
+		EntityIdentifiers.restore(this.vitrail$heldIdentifiers);
 	}
 }

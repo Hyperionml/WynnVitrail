@@ -93,7 +93,13 @@ public final class WynncraftSkyMarking {
 			return false;
 		}
 
-		WynncraftSky.note(blue, deltaY);
+		if (WynnOption.DEBUG.enabled()) {
+            String key = "sky-marker-" + blue;
+            if (WynncraftDebugLog.shouldLog(key)) {
+                WynncraftDebugLog.info(key, "Wynncraft sky marker id={} sprite={} deltaY={}", blue, contents.name(), deltaY);
+            }
+        }
+        WynncraftSky.note(blue, deltaY);
 
 		return true;
 	}

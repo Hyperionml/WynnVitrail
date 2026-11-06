@@ -120,6 +120,13 @@ final class WynncraftSignals {
 	 * alpha is a channel the pack blends by on purpose, so taking the marker out of it would take
 	 * the blending with it. {@link WynncraftShading} leaves the alpha alone and fixes the colour.
 	 */
+	private static final String ARMOR_MARKER =
+            "bool wynnMountArmor(vec4 colour) {\n"
+            + "\tivec4 c = ivec4(round(colour * 255.0));\n"
+			+ "\treturn c.a == 252 || c.a == 250 || (colour.r < 0.01 && colour.b < 0.01 && (c.g == 252 || c.g == 250))"
+			+ " || ((c.r == 252 || c.r == 250) && c.g == 255 && c.b == 255);\n"
+            + "}";
+
 	private static final String NEUTRALISE =
 			"vec4 " + NEUTRALISE_NAME + "(vec4 colour) {\n"
 			+ "\tif (wynnIsGlint(colour)) {\n"
@@ -128,6 +135,10 @@ final class WynncraftSignals {
 			+ "\tif (wynnIsTranslucent(colour)) {\n"
 			+ "\t\treturn vec4(1.0, 1.0, 1.0, " + ALPHA_NAME + "(" + TRANSLUCENCY_NAME + "(colour)));\n"
 			+ "\t}\n"
+			+ "\tivec4 c = ivec4(round(colour * 255.0));\n"
+			+ "\tbool movement = c.g == 240 || c.g == 235 || c.g == 60 || c.g == 58 || c.g == 59;\n"
+
+			+ "\tif (movement || wynnMountArmor(colour)) return vec4(1.0);\n"
 			+ "\treturn colour;\n"
 			+ "}";
 
@@ -139,7 +150,7 @@ final class WynncraftSignals {
 	 * that does not compile, and the failure would name the pack's own file.
 	 */
 	static final String[] HELPERS = {
-		IS_GLINT, IS_TRANSLUCENT, GLINT_ID, TRANSLUCENCY, TRANSLUCENT_ALPHA, NEUTRALISE};
+		IS_GLINT, IS_TRANSLUCENT, GLINT_ID, TRANSLUCENCY, TRANSLUCENT_ALPHA, ARMOR_MARKER, NEUTRALISE};
 
 	private WynncraftSignals() {
 	}

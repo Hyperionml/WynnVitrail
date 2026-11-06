@@ -10,4 +10,10 @@ package dev.vitrail.render;
 public interface BlockEntityMark extends BlockEntityOrigin {
 
 	void vitrail$fromBlockEntity(boolean fromBlockEntity);
+
+	boolean vitrail$textBackground();
+	void vitrail$textBackground(boolean value);
+
+	boolean vitrail$vfx();
+	void vitrail$vfx(boolean value);
 }

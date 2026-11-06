@@ -81,6 +81,8 @@ public abstract class RenderTypeFeatureRendererMixin {
 					+ "Lnet/minecraft/client/renderer/StagedVertexBuffer$ExecuteInfo;"))
 	private StagedVertexBuffer.ExecuteInfo vitrail$origin(StagedVertexBuffer buffer,
 			StagedVertexBuffer.Draw draw, Operation<StagedVertexBuffer.ExecuteInfo> original) {
+		dev.wynnvitrail.WynnTextBackground.drawing = ((dev.vitrail.render.BlockEntityMark) draw).vitrail$textBackground();
+		dev.wynnvitrail.WynnVfx.drawing(((dev.vitrail.render.BlockEntityMark) draw).vitrail$vfx());
 		BlockEntityGeometry.drawing(((BlockEntityOrigin) draw).vitrail$fromBlockEntity());
 
 		return original.call(buffer, draw);
@@ -112,6 +114,8 @@ public abstract class RenderTypeFeatureRendererMixin {
 	private void vitrail$close(FeatureFrameContext context, @Nullable OitStage stage,
 			RenderPass pass, int groupIndex, List<?> submits, boolean strictlyOrdered,
 			CallbackInfo callback) {
+		dev.wynnvitrail.WynnTextBackground.drawing = false;
+		dev.wynnvitrail.WynnVfx.drawing(false);
 		EntityDraw.endGroup();
 	}
 }

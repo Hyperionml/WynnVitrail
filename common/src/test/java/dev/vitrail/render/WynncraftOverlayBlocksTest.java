@@ -28,6 +28,21 @@ import org.junit.jupiter.api.Test;
  * alignment rules could agree with the constant and not with the writer.
  */
 class WynncraftOverlayBlocksTest {
+    @Test
+    void translucentDepthOverClearSkyDoesNotEnableTerrainTint() {
+        String scene = WynncraftOverlay.SCENE;
+        assertTrue(scene.contains("opaqueDepth = texture(DepthOpaque, ofTexCoord).r"));
+        assertTrue(scene.contains("if (opaqueDepth > 0.999999 || sceneDepth > 0.999999) { ofFragData0 = existing; return; }"));
+    }
+
+    @Test
+    void compileFullscreenStagesToSpirv() {
+        dev.wynnvitrail.ShaderCompileCheck.compile(dev.vitrail.pack.model.ProgramStage.VERTEX, WynncraftOverlay.VERTEX);
+        for (String source : java.util.List.of(WynncraftOverlay.SKY, WynncraftOverlay.SCENE, WynncraftOverlay.FOG, WynncraftOverlay.TRANSITION)) {
+            dev.wynnvitrail.ShaderCompileCheck.compile(dev.vitrail.pack.model.ProgramStage.FRAGMENT, source);
+        }
+    }
+
 
 	/**
 	 * The fog, whose declaration is one matrix, two colours' worth of parameters and the screen.

@@ -132,6 +132,8 @@ public final class EngineStages {
 	 * through an event of its own.
 	 */
 	public static void clientTick() {
+		dev.wynnvitrail.WynncraftMountArmorOverlay.onClientTick(net.minecraft.client.Minecraft.getInstance());
+		dev.wynnvitrail.ambience.WynnAmbience.tick();
 		SettingsKey.poll();
 		HostReport.sayInWorld();
 
@@ -153,6 +155,7 @@ public final class EngineStages {
 	 * and the last lines below have nothing to do with the two arguments.
 	 */
 	public static void frameGraphSetup(Matrix4fc modelView, Vec3 cameraPosition) {
+		dev.wynnvitrail.WynncraftMountArmorOverlay.beginFrame();
 		if (HostReport.otherBackend()) {
 			return;
 		}

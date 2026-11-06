@@ -123,6 +123,16 @@ public final class DhLods {
 	/** False once the road to those two has been walked and failed, which it will fail again. */
 	private static boolean mutable = true;
 
+	/**
+	 * Whether DH's own clouds are held off for the pack being drawn, which is the one thing
+	 * {@link #clouds} may hand back. Reached and not taken: a switch DH refused is still one asked
+	 * once rather than every frame.
+	 */
+	private static boolean cloudsHeld;
+
+	/** False once the road to DH's cloud switch has been walked and failed, or DH is not there. */
+	private static boolean cloudsHoldable = true;
+
 	/** The renderer DH bound for itself, which everything this engine does not serve falls back on. */
 	private static Object original;
 
@@ -434,23 +444,130 @@ public final class DhLods {
 		Method enabled = ambientOcclusion.getReturnType().getMethod("enabled");
 		Method dhFog = fog.getReturnType().getMethod("enableDhFog");
 
-		// Both of DH's own setters answer with a boolean, and both are declared on the one config
-		// value interface, so a null value picks the one that gives a switch back to the player.
+		// Both are declared on the one config value interface, which is the type the setters are
+		// asked of.
 		Class<?> configValue = enabled.getReturnType();
-		Method action = value == null
-				? configValue.getMethod("clearValue")
-				: configValue.getMethod("setValue", Object.class);
-		Object[] arguments = value == null ? new Object[0] : new Object[] { value };
 
 		int held = 0;
 		for (Object one : List.of(enabled.invoke(ambientOcclusion.invoke(graphicsConfig)),
 				dhFog.invoke(fog.invoke(graphicsConfig)))) {
-			if (Boolean.TRUE.equals(action.invoke(one, arguments))) {
+			if (set(configValue, one, value)) {
 				held++;
 			}
 		}
 
 		return held;
+	}
+
+	/**
+	 * Sets one of DH's config values through its API, or hands it back to the player when the value
+	 * is null, and answers whether it took.
+	 * <p>
+	 * <strong>Under this mod's name where DH takes one.</strong> Its config value has two setters:
+	 * {@code setValue(value, caller)}, whose second word is what its menu shows beside a value it
+	 * will not let the player move ("Currently controlled by"), and the older {@code setValue(value)},
+	 * which DH marks deprecated, answers that same line with UNKNOWN and logs a warning addressed to
+	 * the mod's author, once for each setting. A DH that only has the older one is still served
+	 * through it.
+	 */
+	private static boolean set(Class<?> configValue, Object one, Boolean value)
+			throws ReflectiveOperationException {
+		if (value == null) {
+			return Boolean.TRUE.equals(configValue.getMethod("clearValue").invoke(one));
+		}
+
+		Method named;
+		try {
+			named = configValue.getMethod("setValue", Object.class, String.class);
+		} catch (NoSuchMethodException e) {
+			return Boolean.TRUE.equals(
+					configValue.getMethod("setValue", Object.class).invoke(one, value));
+		}
+
+		return Boolean.TRUE.equals(named.invoke(one, value, Vitrail.MOD_NAME));
+	}
+
+	/**
+	 * Holds DH's own clouds off while the pack being drawn asks for that, and hands them back to the
+	 * player once it does not. Called every frame a pack is drawn, with its answer, and with no once
+	 * nothing is, which costs nothing while the answer stands.
+	 * <p>
+	 * <strong>Iris answers the same question and walks another road to it.</strong> It cancels the
+	 * one generic object DH names {@code Clouds} in a {@code DhApiBeforeGenericObjectRenderEvent}
+	 * handler ({@code compat/dh/LodRendererEvents.java:124-132}), on the answer
+	 * {@code compat/dh/DHCompatInternal.java:290} gives. That handler is a subclass of an abstract
+	 * class of DH's, which this engine cannot write while DH is reached by name alone, so the same
+	 * object is held off through DH's published switch for it instead,
+	 * {@code genericRendering().cloudRenderingEnabled()}, which is what that renderer reads. Set
+	 * rather than written, as {@link #mute} sets its two, so the player's own menu is left as it was
+	 * and is answered again the moment no pack asks.
+	 * <p>
+	 * What it costs where it does not take is DH's clouds drawn by DH over the pack's sky, with
+	 * nothing of the pack's lighting or fog on them; under blindness, where the pack's own clouds go
+	 * black, they were the one bright thing left in the sky.
+	 *
+	 * @param avoid whether the pack being drawn keeps DH's clouds out, {@code PackValues.avoidsDhClouds}
+	 */
+	public static void clouds(boolean avoid) {
+		if (avoid == cloudsHeld || !cloudsHoldable) {
+			return;
+		}
+
+		try {
+			Boolean took = holdClouds(avoid ? Boolean.FALSE : null);
+			if (took == null) {
+				// DH has not published its config yet; asked again on the next frame.
+				return;
+			}
+
+			cloudsHeld = avoid;
+			if (avoid) {
+				Vitrail.logger().info(took
+						? "Distant Horizons holds off its own clouds, which the pack asks to keep out "
+								+ "of its sky"
+						: "Distant Horizons does not let its own clouds be held off through its API, so "
+								+ "it keeps drawing them over a sky whose pack asked to keep them out");
+			}
+		} catch (ClassNotFoundException e) {
+			// The ordinary case: DH is simply not installed.
+			cloudsHoldable = false;
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			// The road is closed below and every later call returns at once, the hand-back at
+			// release among them, so a switch still held would stay held for the session with the
+			// player's own menu locked on it. It is handed back first, as mute hands its two back,
+			// and a second throw changes nothing.
+			try {
+				holdClouds(null);
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError swallowed) {
+				e.addSuppressed(swallowed);
+			}
+
+			cloudsHeld = false;
+			cloudsHoldable = false;
+			Vitrail.logger().info("Distant Horizons keeps drawing its own clouds whatever the pack asks, "
+					+ "its cloud switch not being one this engine can reach: {}", e.toString());
+		}
+	}
+
+	/**
+	 * Sets DH's cloud switch to one value, or hands it back to the player when it is null, on the
+	 * road {@link #hold} walks for its two.
+	 *
+	 * @return whether it took, or null while DH has published no config yet
+	 */
+	private static Boolean holdClouds(Boolean value) throws ReflectiveOperationException {
+		Field field = Class.forName(DELAYED).getField("configs");
+		Object configs = field.get(null);
+		if (configs == null) {
+			return null;
+		}
+
+		Method graphics = field.getType().getMethod("graphics");
+		Method genericRendering = graphics.getReturnType().getMethod("genericRendering");
+		Method cloudRendering = genericRendering.getReturnType().getMethod("cloudRenderingEnabled");
+		Object one = cloudRendering.invoke(genericRendering.invoke(graphics.invoke(configs)));
+
+		return set(cloudRendering.getReturnType(), one, value);
 	}
 
 	/**
@@ -601,8 +718,13 @@ public final class DhLods {
 	 * switch tied to a live condition rather than latched
 	 * ({@code compat/dh/LodRendererEvents.java:92}). Quiet and idempotent: the ordinary caller is
 	 * every pack unload, most of which never took the far terrain over at all.
+	 * <p>
+	 * DH's clouds go back to the player here too, and whether or not the far terrain was ever taken:
+	 * the pack's word about them stood on its own.
 	 */
 	public static void handBack() {
+		clouds(false);
+
 		if (substitute != null && original != null) {
 			restore();
 		}

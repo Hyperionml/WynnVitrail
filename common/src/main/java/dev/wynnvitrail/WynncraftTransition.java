@@ -34,62 +34,20 @@ public final class WynncraftTransition {
 	/** The last character that names a transition, which names the nineteenth kind. */
 	public static final char LAST_CHARACTER = '\uE012';
 
-	private static volatile int kind;
+	public record Detection(int kind, float progress, int colour) {}
 
-	private static volatile float progress;
+	private static final java.util.concurrent.atomic.AtomicReference<Detection> pending =
+			new java.util.concurrent.atomic.AtomicReference<>();
 
-	private static volatile int colour;
+	private WynncraftTransition() {}
 
-	private WynncraftTransition() {
-	}
-
-	/**
-	 * Takes one transition, from the entity that asked for it.
-	 *
-	 * @param kind     which of the numbered patterns, one to nineteen
-	 * @param progress how far through the transition the screen is, nought to one, read off the
-	 *                 entity's own opacity
-	 * @param colour   the transition's colour as {@code 0xRRGGBB}
-	 */
 	public static void note(int kind, float progress, int colour) {
-		WynncraftTransition.kind = kind;
-		WynncraftTransition.progress = progress;
-		WynncraftTransition.colour = colour;
+		if (kind >= 1 && kind <= 19) {
+			pending.set(new Detection(kind, progress, colour));
+		}
 	}
 
-	/**
-	 * Whether a transition is waiting to be drawn, taking its answer with it: the one pass that
-	 * draws a transition draws each note once, and a note left standing would draw the same
-	 * screen over the frames until the next entity replaced it.
-	 */
-	public static boolean consume() {
-		return kind > 0 && progress > 0.001F;
-	}
-
-	/** Which of the numbered patterns the waiting transition asked for. */
-	public static int kind() {
-		return kind;
-	}
-
-	/** How far through the transition the screen is, nought to one. */
-	public static float progress() {
-		return progress;
-	}
-
-	/** The waiting transition's colour as {@code 0xRRGGBB}. */
-	public static int colour() {
-		return colour;
-	}
-
-	/**
-	 * Empties the note, which the pass does once it has drawn it.
-	 * <p>
-	 * Public rather than package private, and not because anything outside this package is meant to
-	 * raise a transition: the pass that draws it lives in {@code dev.vitrail.render}, one module
-	 * across, and it is the one caller this has. The whole class is public for the same reason -
-	 * the mixin that catches the entity is in the other module too.
-	 */
-	public static void taken() {
-		kind = 0;
+	public static Detection consume() {
+		return pending.getAndSet(null);
 	}
 }

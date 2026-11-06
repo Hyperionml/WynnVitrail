@@ -1,5 +1,6 @@
 package dev.vitrail.mixin;
 
+import dev.wynnvitrail.WynnOption;
 import dev.wynnvitrail.WynncraftSettings;
 import dev.wynnvitrail.WynncraftSky;
 import dev.wynnvitrail.WynncraftText;
@@ -70,6 +71,12 @@ public abstract class TextDisplayLightMixin {
 		}
 
 		float partial = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+		if (WynnOption.TEXT.enabled()) {
+			int floor = WynnOption.FLOOR.value();
+			int block = Math.max((packedLight >> 4) & 15, floor);
+			int sky = Math.max((packedLight >> 20) & 15, floor);
+			packedLight = (packedLight & ~0xf000f0) | (sky << 20) | (block << 4);
+		}
 		float strength = WynncraftSky.textLightBoost(level.getRainLevel(partial));
 		if (strength <= 0.0F) {
 			return packedLight;

@@ -74,12 +74,6 @@ final class WynncraftShading {
 	 */
 	static final String IS_EMISSIVE_NAME = "wynnIsEmissive";
 
-	/**
-	 * The strength a self-lit texel is lifted by, which is WynnIris's setting at its shipped default
-	 * of a hundred out of a hundred.
-	 */
-	private static final String EMISSIVITY = "const float wynnEntityEmissivity = 1.0;";
-
 	private static final String IS_SHADELESS =
 			"bool " + IS_SHADELESS_NAME + "(vec4 texel) {\n"
 			+ "\treturn abs(texel.a * 255.0 - 251.0) < 0.5;\n"
@@ -99,7 +93,21 @@ final class WynncraftShading {
 	 * {@link WynncraftSignals#HELPERS} gives: a helper added below is added here or not at all, and a
 	 * callee the header never wrote is a stage that does not compile.
 	 */
-	static final String[] HELPERS = {EMISSIVITY, IS_SHADELESS, IS_EMISSIVE};
+	private static final String SIGNAL_HELPERS = """
+			vec4 wynnSignalTexel(sampler2D atlas, vec2 uv) {
+			    ivec2 size = textureSize(atlas, 0);
+			    return texelFetch(atlas, clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1), 0);
+			}
+			int wynnLightMode = 0;
+			float wynnCorrectLight(float packedValue) {
+			    if (wynnLightMode == 2) return 1.0;
+			    if (wynnLightMode == 0) return packedValue;
+			    int skyByte = int(round(packedValue * 65535.0)) / 256;
+			    return float(skyByte * 256 + 255) / 65535.0;
+			}
+			""";
+
+	static final String[] HELPERS = {IS_SHADELESS, IS_EMISSIVE, SIGNAL_HELPERS};
 
 	private WynncraftShading() {
 	}
@@ -135,7 +143,7 @@ final class WynncraftShading {
 	 * @return the statements, for the wrapper, after the pack's own body
 	 */
 	static String shadeless(String output, String sampler) {
-		return "{ vec4 wynnShadingTexel = texture(" + sampler + ", "
+		return "{ vec4 wynnShadingTexel = wynnSignalTexel(" + sampler + ", "
 				+ GlslTranslator.ENTITY_VERTEX_UV + "); if (" + IS_SHADELESS_NAME
 				+ "(wynnShadingTexel)) { " + output + ".rgb /= max("
 				+ WynncraftSignals.NEUTRALISE_NAME + "(" + GlslTranslator.ENTITY_VERTEX_COLOR
@@ -176,11 +184,11 @@ final class WynncraftShading {
 	 * @param boost   the name of the member holding how far this draw's entities are lifted
 	 * @return the statements, for the wrapper, after the pack's own body
 	 */
-	static String lightTweaks(String output, String sampler, String effect, String boost) {
-		return "{ vec4 wynnShadingTexel = texture(" + sampler + ", " + GlslTranslator.ENTITY_VERTEX_UV
+	static String lightTweaks(String output, String sampler, String effect, String boost, boolean packedLight) {
+		return "{ vec4 wynnShadingTexel = wynnSignalTexel(" + sampler + ", " + GlslTranslator.ENTITY_VERTEX_UV
 				+ "); if (" + IS_EMISSIVE_NAME + "(wynnShadingTexel) && !(" + effect + " >= 15 && "
-				+ effect + " <= 24)) { " + output + ".rgb = mix(" + output + ".rgb, max(" + output
-				+ ".rgb, wynnShadingTexel.rgb), wynnEntityEmissivity); } else { " + compensation(output, boost)
+				+ effect + " <= 24)) { " + (packedLight ? "if (wynnEntityEmissivity > 0.0) wynnLightMode = 1; " : "") + output + ".rgb = mix(" + output + ".rgb, max(" + output
+				+ ".rgb, texture(" + sampler + ", " + GlslTranslator.ENTITY_VERTEX_UV + ").rgb), wynnEntityEmissivity); } else { " + compensation(output, boost)
 				+ "} } ";
 	}
 

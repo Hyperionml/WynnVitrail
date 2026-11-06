@@ -7,9 +7,10 @@ import dev.vitrail.glsl.VaryingSplit.SplitStruct;
 import dev.vitrail.glsl.VaryingSplit.StructMember;
 import dev.vitrail.pack.model.AlphaTest;
 import dev.vitrail.pack.model.ProgramStage;
+import dev.wynnvitrail.WynncraftPatch;
 import dev.vitrail.pack.texture.CustomImages;
 import dev.vitrail.pack.texture.VolumeAtlas;
-import dev.wynnvitrail.WynncraftPatch;
+import dev.vitrail.uniform.ClipSpace;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -48,7 +49,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 		boolean distantPrologue, boolean entityWrapped, boolean linesWrapped,
 		boolean alphaEpilogue, boolean covers,
 		boolean wrapsFragment, boolean ordered, boolean namesFragDepth, boolean makesOverlayColour,
-		boolean wynncraftAnchored, boolean wynncraftTextBoost, boolean coreProfile) {
+		boolean wynncraftAnchored, boolean wynncraftTextBoost, boolean clampBackground, boolean coreProfile) {
 
 	private static final String VERSION = "#version 460 core";
 
@@ -81,6 +82,16 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 	 * depth is in front of, and the reader owes them no test of their own.
 	 */
 	private static final String COVERAGE = "ofCoverage";
+
+	/**
+	 * What a piece of the sky leaves in the mask instead of its own depth, which is the far plane.
+	 * <p>
+	 * The sky neither tests nor writes the depth attachment ({@code SkyDraw.descriptor}), so under
+	 * every pixel of it the attachment still holds its clear, and the mask is to carry what the
+	 * attachment holds. Recording the disc's own depth, sixteen blocks over the eye, cut away every
+	 * feature the game drew behind that plane, the core of a beacon beam first among them.
+	 */
+	private static final String FAR_PLANE = ClipSpace.REVERSED.z < 0.0F ? "0.0" : "1.0";
 
 	String header(List<TranslatedUnit.Uniform> block, List<TranslatedUnit.Uniform> samplers,
 			Set<String> varyings, Set<String> shadowed) {
@@ -343,7 +354,10 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 		// Declared on both sides or on neither, whether this stage reads it or not. A varying the
 		// vertex writes and the fragment never mentions is accepted in silence and shifts the
 		// location of everything declared after it.
-		if (varyings.contains(GlslTranslator.FOG_COORD)) {
+		if (varyings.contains("wynnBackgroundAlpha")) {
+            lines.add((this.stage == ProgramStage.VERTEX ? "out" : "in") + " float wynnBackgroundAlpha;");
+        }
+        if (varyings.contains(GlslTranslator.FOG_COORD)) {
 			lines.add((this.stage == ProgramStage.VERTEX ? "out" : "in") + " float "
 					+ GlslTranslator.FOG_COORD + ";");
 		}
@@ -538,6 +552,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 				+ (this.terrainPrologue ? SodiumVertex.PROLOGUE + "(); " : "")
 				+ (this.distantPrologue ? DistantVertex.PROLOGUE + "(); " : "")
 				+ overlayPrologue()
+				+ (this.stage == ProgramStage.VERTEX && varyings.contains("wynnBackgroundAlpha") ? "wynnBackgroundAlpha = Color.a; " : "")
 				+ identifierPrologue(varyings)
 				+ carryPrologue()
 				+ (wrapsFragment() ? GlslTranslator.ORDER_OUTPUTS + "(); " : "")
@@ -557,7 +572,8 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 				+ (this.alphaEpilogue
 						? " " + this.alphaTest.discard(outputName(0, shadowed) + ".a")
 						: "")
-				+ (this.covers ? " " + COVERAGE + " = " + writtenDepth() + ";" : "")
+				+ (this.covers ? " " + COVERAGE + " = "
+						+ (this.inputs == VertexInputs.SKY ? FAR_PLANE : writtenDepth()) + ";" : "")
 				+ " }\n";
 	}
 
@@ -603,10 +619,13 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 	 * - and reading a builtin the stage never wrote is undefined, so the mask would carry whatever
 	 * the driver left there. Writing it costs the early depth test, which is why a stage that never
 	 * names it is left alone: it would pay that for a value the line below can read off
-	 * {@code gl_FragCoord} instead.
+	 * {@code gl_FragCoord} instead. Nor is a piece of the sky given it: its mask takes
+	 * {@link #FAR_PLANE} and reads no depth at all.
 	 */
 	private String coveragePrologue() {
-		return this.covers && this.namesFragDepth ? "gl_FragDepth = gl_FragCoord.z; " : "";
+		return this.covers && this.namesFragDepth && this.inputs != VertexInputs.SKY
+				? "gl_FragDepth = gl_FragCoord.z; "
+				: "";
 	}
 
 	/**
@@ -700,7 +719,7 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 			return "";
 		}
 
-		StringBuilder assignments = new StringBuilder();
+		StringBuilder assignments = new StringBuilder("wynnItemFlags = float(EntityIds.w); ");
 
 		// The emote decode, ahead of every carry below it: the coordinate the effects sample is
 		// the REMAPPED one - a limb's own region of the skin rather than the head's the mesh
@@ -781,7 +800,8 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 			String boost = WynncraftPatch.ENTITY_BOOST;
 			String text = outputName(0, shadowed);
 
-			return text + ".rgb *= " + boost + " * " + boost + " * " + boost + "; ";
+			String clamp = this.clampBackground ? text + ".a = min(" + text + ".a, wynnBackgroundAlpha); " : "";
+			return clamp + text + ".rgb *= " + boost + " * " + boost + " * " + boost + "; ";
 		}
 
 		// The deferred half wrote the statements into the pack's own main instead, at an anchor
@@ -808,7 +828,8 @@ record Emitter(ProgramStage stage, VertexInputs inputs, List<String> bound, Stri
 		String second = this.maxFragmentOutput >= 1 ? outputName(1, shadowed) : null;
 
 		return WynncraftPatch.epilogue(this.stage, this.inputs, outputName(0, shadowed),
-				second, this.used.contains("vlAlbedo"), this.atlasSampler);
+				second, this.used.contains("vlAlbedo"), this.atlasSampler, false, false,
+				first != null && !first.name().equals("outColor0") && !first.name().equals("iris_FragData0"));
 	}
 
 	/** What output {@code slot} is called, which is the pack's own name when it declared one. */

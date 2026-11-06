@@ -81,6 +81,7 @@ public final class WynncraftSettings {
 	 *                      {@code shaderpacks/} are and is not ours to choose
 	 */
 	public static void read(Path gameDirectory) {
+		WynnOption.read(gameDirectory);
 		running = !Files.isRegularFile(gameDirectory.resolve(Vitrail.MOD_ID).resolve(OFF_FILE));
 		Vitrail.logger().info(state());
 	}

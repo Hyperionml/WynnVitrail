@@ -93,10 +93,11 @@ final class WynncraftSkybox {
 	private static final String SIGNAL =
 			"""
 			int wynnSkyboxSignal(sampler2D tex, vec2 uv) {
-			    vec4 sc = textureLod(tex, uv, 0.0);
+			    ivec2 size = textureSize(tex, 0);
+			    vec4 sc = texelFetch(tex, clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1), 0);
 			    int sg = int(round(sc.g * 255.0));
 			    int sa = int(round(sc.a * 255.0));
-			    if (abs(sg - 251) <= 1 && abs(sa - 254) <= 1) {
+			    if (sg == 251 && sa == 254) {
 			        int sid = int(round(sc.b * 255.0));
 			        if (sid >= 1 && sid <= 7) return sid;
 			    }

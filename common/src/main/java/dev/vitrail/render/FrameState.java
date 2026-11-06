@@ -1,5 +1,6 @@
 package dev.vitrail.render;
 
+import dev.wynnvitrail.WynnOption;
 import dev.vitrail.dh.DhDepth;
 import dev.vitrail.pack.id.NameIds;
 import dev.vitrail.pack.model.RenderStage;
@@ -140,6 +141,7 @@ public final class FrameState implements WorldState {
 
 	// world
 	private long worldTime;
+	private float animationTicks;
 	private long worldDay;
 	private int moonPhase;
 	private float sunAngleDegrees;
@@ -386,13 +388,14 @@ public final class FrameState implements WorldState {
 		// level the probe is made on, and read back by the pass that fogs the finished picture.
 		// WynnIris notes it in its own fog mixin, at the one moment of the frame the same three
 		// things are in hand ({@code MixinFogRenderer.java:181-203}).
-		WynncraftMist.note(level, camera, this.partialTick);
+		WynncraftMist.note(level, camera, this.partialTick, this.fogColor);
 
 		// Which of Wynncraft's skies the player is under, settled for the frame about to be drawn.
 		// The markings it settles were read during the LAST frame's level draw, which is this
 		// engine's shape rather than a lag: the frame's snapshot is taken before anything is drawn,
 		// so what it can see is the frame before. WynncraftSky carries the whole of that argument.
 		WynncraftSky.advance(this.frameTime);
+		applyWynnSkyLighting(level.getDefaultClockTime());
 
 		// Cleared last, so that a frame in which nothing captured falls back rather than
 		// publishing the frame before it. The bob goes with it and for the same reason: a frame
@@ -605,6 +608,7 @@ public final class FrameState implements WorldState {
 
 		this.dimensionOrdinal = dimensionOrdinal(level);
 
+		this.animationTicks = level.getGameTime() % 24000L + pt;
 		long clock = level.getDefaultClockTime();
 		this.worldDay = clock / 24000L;
 		// The Nether and the End keep the raw modulus rather than honouring hasFixedTime. That is
@@ -1329,6 +1333,32 @@ public final class FrameState implements WorldState {
 	}
 
 	// world
+
+	// Match the ambient sky and fog supplied to shader packs by WynnIris.
+	private void applyWynnSkyLighting(long dayTime) {
+		int sky = WynncraftSky.id();
+		if ((sky != 3 && sky != 4 && sky != 5 && sky != 7) || this.rainStrength > 0.2F) {
+			return;
+		}
+		float daylight = Math.max(0.0F, (float) Math.sin((dayTime % 24000L) * Math.PI / 12000.0));
+		float blend = WynncraftSky.fade() * daylight * WynnOption.DARK.scale();
+		float red = sky == 4 ? 0.10F : sky == 7 ? 0.08F : 0.05F;
+		float greenBlue = sky == 4 || sky == 7 ? 0.02F : 0.05F;
+		WynncraftMist.blendSky(blend);
+		this.fogColor.x = Mth.lerp(blend, this.fogColor.x, red);
+		this.fogColor.y = Mth.lerp(blend, this.fogColor.y, greenBlue);
+		this.fogColor.z = Mth.lerp(blend, this.fogColor.z, greenBlue);
+		int raw = this.skyColorPacked;
+		int r = Math.round(Mth.lerp(blend, (raw >>> 16) & 255, red * 255.0F));
+		int g = Math.round(Mth.lerp(blend, (raw >>> 8) & 255, greenBlue * 255.0F));
+		int b = Math.round(Mth.lerp(blend, raw & 255, greenBlue * 255.0F));
+		this.skyColorPacked = (raw & 0xff000000) | (r << 16) | (g << 8) | b;
+	}
+
+	@Override
+	public float animationTicks() {
+		return this.animationTicks;
+	}
 
 	@Override
 	public long worldTime() {

@@ -289,7 +289,8 @@ public final class GlslTranslator {
 			new Carry(ENTITY_VERTEX_UV, "vec2"),
 			new Carry(ENTITY_VERTEX_MID_TEX, "vec2"),
 			new Carry(ENTITY_VERTEX_POSITION, "vec3"),
-			new Carry(ENTITY_VERTEX_NEAR_FADE, "float"));
+			new Carry(ENTITY_VERTEX_NEAR_FADE, "float"),
+			new Carry("wynnItemFlags", "float"));
 
 	/** One of {@link #ENTITY_CARRY}: a varying's name and the type both stages declare it under. */
 	record Carry(String name, String type) {
@@ -544,6 +545,8 @@ public final class GlslTranslator {
 
 	/** The program the pass wants, which decides what the engine supplies it undeclared. */
 	private final String program;
+	private final boolean wynnBackground;
+	private boolean clampBackground;
 
 	/**
 	 * The volumes the pack ships and this engine serves flat, and what moving them onto an atlas
@@ -862,6 +865,7 @@ public final class GlslTranslator {
 	 * written is withheld through this flag. See {@link #deferredAnchor}.
 	 */
 	private int wynncraftAnchor = -1;
+	private String wynnFallbackDiscard;
 
 	/** Which function each token sits in, read while every brace is still the pack's own. */
 	private int[] regions = new int[0];
@@ -894,7 +898,8 @@ public final class GlslTranslator {
 		this.bound = List.copyOf(bound);
 		this.alphaTest = alphaTest;
 		this.coverage = coverage;
-		this.program = program;
+		this.wynnBackground = inputs == VertexInputs.GLYPH && program.endsWith("#wynn_bg");
+        this.program = this.wynnBackground ? program.substring(0, program.length() - "#wynn_bg".length()) : program;
 
 		// Tokens cost far more than the text they came from, roughly seventy bytes each, so a unit
 		// the expander should never have produced has to be refused before it is read rather than
@@ -1030,7 +1035,7 @@ public final class GlslTranslator {
 				// so a unit translated with it off must not be served to a run with it on. Read off
 				// the settings rather than repeated here, so a state added to them is in the key or
 				// nowhere.
-				+ " wynncraft:" + WynncraftSettings.key()
+				+ " wynncraft-v7:" + WynncraftSettings.key()
 				+ " custom-views-v1:" + CustomImages.key();
 	}
 
@@ -1097,6 +1102,9 @@ public final class GlslTranslator {
 		this.regions = regions();
 		orderFragmentOutputs();
 		wrapMain();
+		if (this.wynnFallbackDiscard != null) {
+			this.tokens.inject(this.wynncraftAnchor, this.tokens.get(this.wynncraftAnchor).text() + this.wynnFallbackDiscard);
+		}
 		// After wrapMain, because the wrapper is where the columns are copied and reconstructed, and
 		// before collectVaryings, because a matrix left as one out is one SPIR-V variable occupying
 		// three locations and createFromSpirv then numbers the next name onto the second column.
@@ -1193,6 +1201,7 @@ public final class GlslTranslator {
 		/** Varyings the engine names, which both sides of a program have to declare or neither. */
 		public Set<String> varyings() {
 			Set<String> named = new LinkedHashSet<>();
+			if (this.translator.clampBackground) named.add("wynnBackgroundAlpha");
 			if (this.translator.used.contains(FOG_COORD)) {
 				named.add(FOG_COORD);
 			}
@@ -1393,6 +1402,7 @@ public final class GlslTranslator {
 	 * meaning for it, its own.
 	 */
 	private String body(Set<String> shadowed) {
+		undefineRedefinedMacros();
 		if (shadowed.isEmpty()) {
 			return this.tokens.join();
 		}
@@ -1909,6 +1919,63 @@ public final class GlslTranslator {
 	}
 
 	/**
+	 * Puts an {@code #undef} in front of every live redefinition of a macro that
+	 * {@link #settleRedefinedMacros} had to leave standing, which is the reference's reading of it.
+	 * <p>
+	 * A driver that accepts the pair gives each use the body in force where it stands: the first
+	 * body before the redefinition and the second after it. An {@code #undef} right in front of the
+	 * redefinition says exactly that to a compiler that refuses the pair, so no use changes value.
+	 * The pairs left for this are the ones read in between, which settling cannot touch: Eclipse
+	 * writes {@code diagonal3} in its composite2 and reads it through {@code projMAD} for three
+	 * hundred lines before {@code lib/util.glsl} defines it again, a body apart, and the whole pack
+	 * was refused over it.
+	 * <p>
+	 * <strong>Here and not in the rewrite, because of what it costs.</strong> The {@code #undef}
+	 * needs a line of its own, and every pass of the rewrite reads liveness off line numbers
+	 * ({@link TokenStream#lineNumbers}) and indices it recorded earlier. So it is written into the
+	 * text of the {@code #} token of the redefinition, which keeps the tokens where they are, and
+	 * only when the body is joined, after which nothing reads a line number again. The one thing
+	 * that moves is the line the compiler names in its own messages, one per {@code #undef}.
+	 */
+	private void undefineRedefinedMacros() {
+		int[] lines = this.tokens.lineNumbers();
+		Map<String, String> inForce = new HashMap<>();
+		Map<Integer, String> redefinitions = new LinkedHashMap<>();
+		for (int index = 0; index < this.tokens.size(); index++) {
+			Token token = this.tokens.get(index);
+			if (token.kind() != Kind.HASH || !this.unit.isLive(lines[index])) {
+				continue;
+			}
+
+			boolean define = "define".equals(token.directive());
+			if (!define && !"undef".equals(token.directive())) {
+				continue;
+			}
+
+			int name = this.tokens.macroNameAfter(index);
+			if (name < 0) {
+				continue;
+			}
+
+			String named = this.tokens.get(name).text();
+			if (!define) {
+				inForce.remove(named);
+				continue;
+			}
+
+			String body = macroBody(name);
+			String previous = inForce.put(named, body);
+			// Only the "#" the lexer gave, so that joining a second time does not undefine twice.
+			if (previous != null && !previous.equals(body) && token.text().equals("#")) {
+				redefinitions.put(index, named);
+			}
+		}
+
+		redefinitions.forEach((index, named) ->
+				this.tokens.replace(index, "#undef " + named + "\n" + this.tokens.get(index).text()));
+	}
+
+	/**
 	 * Whether anything between two definitions of a macro reads it, which is what decides whether
 	 * the two can be settled into one. The name a {@code #define} gives is not a read of it, and
 	 * neither is a line nobody takes.
@@ -2015,9 +2082,13 @@ public final class GlslTranslator {
 	 * across a conditional, {@code out} under one branch and {@code in} under the other, which is
 	 * read through, the live word deciding; and a read of the instance inside a macro body is
 	 * rewritten with the rest. A block with no instance name already reads its members as globals
-	 * and is only unwrapped. Left whole: a block declared as an array, which only a geometry or
-	 * tessellation stage reads and this engine binds neither; a {@code patch} block, for the same
-	 * reason; {@code gl_PerVertex}, the compiler's block and not a pack's; and a block one of
+	 * and is only unwrapped. A geometry stage's input block is an array, one element per corner,
+	 * and each member becomes an array of its own ({@code data_in[i].color} to
+	 * {@code of_DATA_color[i]}): that stage is never bound, but a device without geometry shaders
+	 * folds a pass-through one into the fragment stage, and the fold reads varyings and not
+	 * blocks. Eclipse's terrain passes its corners that way and lost its terrain program to the
+	 * block. Left whole: any other block declared as an array, which only a tessellation stage
+	 * reads and this engine binds none; a {@code patch} block, for the same reason; {@code gl_PerVertex}, the compiler's block and not a pack's; and a block one of
 	 * whose members the pass cannot read, since half a block is worse than the whole one. What is
 	 * not told apart is a local named like the instance whose own field is named like a member,
 	 * which no pack of the corpus writes.
@@ -2050,9 +2121,31 @@ public final class GlslTranslator {
 
 			String instance = null;
 			int end = after;
+			List<Token> corners = List.of();
 			if (this.tokens.get(after).kind() == Kind.IDENTIFIER) {
 				instance = this.tokens.get(after).text();
 				end = this.tokens.significantAfter(after);
+				// A geometry stage reads its inputs one corner at a time, as an array of the
+				// block, and it is the one arrayed block read here: the fold reads that stage.
+				if (end >= 0 && this.tokens.get(end).operator("[") && token.identifier("in")
+						&& this.stage == ProgramStage.GEOMETRY) {
+					int closing = this.tokens.matchingBracket(end);
+					if (closing < 0) {
+						index = close;
+						continue;
+					}
+
+					List<Token> suffix = new ArrayList<>();
+					for (int at = end; at <= closing; at++) {
+						Token piece = this.tokens.get(at);
+						if (!piece.trivia() && piece.kind() != Kind.NEWLINE) {
+							suffix.add(piece);
+						}
+					}
+
+					corners = List.copyOf(suffix);
+					end = this.tokens.significantAfter(closing);
+				}
 			}
 
 			if (end < 0 || !this.tokens.get(end).operator(";")) {
@@ -2115,6 +2208,16 @@ public final class GlslTranslator {
 				declaration.clear();
 			}
 
+			// A member that is an array of its own would become an array of arrays, a shape the
+			// fold does not read either, so such a block stays whole as before.
+			if (!corners.isEmpty() && members.stream().flatMap(member -> member.names().stream())
+					.anyMatch(at -> {
+						int next = this.tokens.significantAfter(at);
+						return next >= 0 && this.tokens.get(next).operator("[");
+					})) {
+				readable = false;
+			}
+
 			if (!readable || !declaration.isEmpty()) {
 				index = close;
 				continue;
@@ -2124,13 +2227,15 @@ public final class GlslTranslator {
 			String prefix = instance == null ? "" : "of_" + this.tokens.get(name).text() + "_";
 			List<String> names = new ArrayList<>();
 			for (BlockMember member : members) {
-				flattenMember(member, storage, carried, prefix, names, insertions);
+				flattenMember(member, storage, carried, prefix, corners, names, insertions);
 			}
 
 			blankCode(start, brace);
 			blankCode(close, end);
-			if (instance != null) {
+			if (instance != null && corners.isEmpty()) {
 				rewriteBlockReads(instance, prefix, names);
+			} else if (instance != null) {
+				rewriteCornerReads(instance, prefix, names);
 			}
 
 			index = close;
@@ -2254,7 +2359,7 @@ public final class GlslTranslator {
 	 * layout on the member is dropped.
 	 */
 	private void flattenMember(BlockMember member, String storage, List<String> carried, String prefix,
-			List<String> names, List<TokenStream.Insertion> insertions) {
+			List<Token> corners, List<String> names, List<TokenStream.Insertion> insertions) {
 		if (member.layoutAt() >= 0) {
 			dropLocationLayout(member.layoutAt());
 		}
@@ -2263,6 +2368,10 @@ public final class GlslTranslator {
 			String name = this.tokens.get(nameAt).text();
 			names.add(name);
 			this.tokens.replace(nameAt, prefix + name);
+			// The block's corner array, handed to each member: in vec4 of_DATA_color[];
+			for (Token piece : corners) {
+				insertions.add(new TokenStream.Insertion(nameAt + 1, piece));
+			}
 		}
 
 		boolean interpolated = member.qualifiers().stream().anyMatch(INTERPOLATION_QUALIFIERS::contains);
@@ -2284,6 +2393,42 @@ public final class GlslTranslator {
 			if (this.tokens.get(at).directive() == null) {
 				this.tokens.blankRange(at, at);
 			}
+		}
+	}
+
+	/**
+	 * {@link #rewriteBlockReads} for a block read one corner at a time: {@code data_in[i].color}
+	 * becomes {@code of_DATA_color[i]}. The instance takes the member's name and the access after
+	 * the bracket is blanked, which puts the index where the flattened array wants it without
+	 * moving a token.
+	 */
+	private void rewriteCornerReads(String instance, String prefix, List<String> members) {
+		for (int index = 0; index < this.tokens.size(); index++) {
+			Token token = this.tokens.get(index);
+			if (token.macroName() || !token.identifier(instance) || fieldAccess(index)) {
+				continue;
+			}
+
+			int open = this.tokens.significantAfter(index);
+			if (open < 0 || !this.tokens.get(open).operator("[")) {
+				continue;
+			}
+
+			int closing = this.tokens.matchingBracket(open);
+			int dot = closing < 0 ? -1 : this.tokens.significantAfter(closing);
+			if (dot < 0 || !this.tokens.get(dot).operator(".")) {
+				continue;
+			}
+
+			int member = this.tokens.significantAfter(dot);
+			if (member < 0 || this.tokens.get(member).kind() != Kind.IDENTIFIER
+					|| !members.contains(this.tokens.get(member).text())) {
+				continue;
+			}
+
+			this.tokens.replace(index, prefix + this.tokens.get(member).text());
+			this.tokens.blank(dot);
+			this.tokens.blank(member);
 		}
 	}
 
@@ -4126,6 +4271,7 @@ public final class GlslTranslator {
 		}
 
 		int[] lines = this.tokens.lineNumbers();
+		List<Integer> outputs = new ArrayList<>();
 		for (int index = 0; index < this.tokens.size(); index++) {
 			Token token = this.tokens.get(index);
 			if (!token.identifier("out") || token.directive() != null) {
@@ -4133,8 +4279,13 @@ public final class GlslTranslator {
 			}
 
 			if (this.unit.isLive(lines[index]) && opensDeclaration(index)) {
-				liftOutput(index);
+				outputs.add(index);
 			}
+		}
+
+		boolean singleEntityOutput = outputs.size() == 1 && WynncraftPatch.applies(this.stage, this.inputs);
+		for (int output : outputs) {
+			liftOutput(output, singleEntityOutput);
 		}
 
 		for (int location : this.packOutputs.keySet()) {
@@ -4158,7 +4309,7 @@ public final class GlslTranslator {
 		return token.operator(";") || token.operator("}") || token.operator(")");
 	}
 
-	private void liftOutput(int keyword) {
+	private void liftOutput(int keyword, boolean singleEntityOutput) {
 		int start = this.tokens.statementStart(keyword);
 		int end = this.tokens.statementEnd(keyword);
 		if (start < 0 || end < 0) {
@@ -4194,7 +4345,7 @@ public final class GlslTranslator {
 		// and the expander agree on the live branch. Where they do not (rewriteFragmentOutputs
 		// says why they may), the renamed write names an output nobody declares, a refusal where
 		// the two declarations on one location were a refusal before.
-		int location = literalLocation(parts, cursor);
+		int location = singleEntityOutput && cursor == 0 ? 0 : literalLocation(parts, cursor);
 		if (location < 0 || location >= MAX_FRAGMENT_OUTPUTS) {
 			return;
 		}
@@ -4416,12 +4567,14 @@ public final class GlslTranslator {
 			this.injectedNames.add(LegacyGlsl.GAME_MODEL_VIEW);
 		}
 
-		if (!WynncraftPatch.applies(this.stage, this.inputs) || this.maxFragmentOutput < 0) {
+		if (!WynncraftPatch.applies(this.stage, this.inputs)) {
 			return;
 		}
 
 		takeDayClock();
+		if (this.maxFragmentOutput < 0) return;
 		takeEntityBoost();
+		if (this.unit.entry().equals("wynn_vfx.fsh")) { this.wynncraftAnchor = 0; return; }
 
 		// The item tint's two inputs, named into the text the same way the day clock is taken: the
 		// identifier an item draw carries its id on, and the block entity's, whose high bits carry
@@ -4463,23 +4616,32 @@ public final class GlslTranslator {
 			Anchor anchor = deferredAnchor();
 			if (anchor != null) {
 				this.wynncraftAnchor = anchor.at();
-				this.tokens.inject(anchor.at(),
-						anchor.before()
-								// After the semicolon the anchor's statement ends with, which the
-								// replacement has to put back: inject replaces the token rather
-								// than standing before one.
-								? "; " + WynncraftPatch.epilogue(this.stage, this.inputs,
-										anchor.variable(), null, false,
-										atlasSampler(asUniforms(this.samplers)))
-								// Before the if that throws the fragment away, and the if itself
-								// has to go back the same way. A semicolon after the block, which
-								// the language takes between a compound statement and whatever
-								// follows it.
-								: WynncraftPatch.epilogue(this.stage, this.inputs, anchor.variable(),
-										null, false, atlasSampler(asUniforms(this.samplers)))
-										+ "; if");
+				boolean packedLight = first != null && patchPackedLight(first.name());
+				String effects = WynncraftPatch.epilogue(this.stage, this.inputs, anchor.variable(),
+						null, false, atlasSampler(asUniforms(this.samplers)), packedLight, true, false);
+				this.tokens.inject(anchor.at(), anchor.before() ? "; " + effects : effects + "; if");
 				return;
 			}
+			// The outputs hold material channels. Without an albedo anchor even the regular
+			// colour epilogue would corrupt them. Only reject the sky marker.
+			String diffuse = atlasSampler(asUniforms(this.samplers));
+			int brace = mainBrace();
+			this.wynncraftAnchor = brace;
+			if (diffuse != null && brace >= 0) {
+				this.wynnFallbackDiscard = " if (wynnSkyboxSignal(" + diffuse + ", " + ENTITY_VERTEX_UV + ") > 0) discard; ";
+			}
+			return;
+		}
+
+		Anchor tint = deferredAnchor();
+		String atlas = atlasSampler(asUniforms(this.samplers));
+		if (tint != null && tint.before() && atlas != null) {
+			String early = "; { int id = currentRenderedItemId >= 64001 && currentRenderedItemId <= 64032"
+					+ " ? currentRenderedItemId - 64000 : wynnGlintId(" + ENTITY_VERTEX_COLOR + ");"
+					+ " if (id >= 15 && id <= 24) { " + tint.variable()
+					+ ".rgb = clamp(wynnTintEffect(wynnEffectTint(id), texture(" + atlas + ", "
+					+ ENTITY_VERTEX_UV + ")).rgb * wynnTintBrightness, 0.0, 1.0); wynnTintAppliedEarly = true; } }";
+			this.tokens.inject(tint.at(), early);
 		}
 
 		if (this.packMainName < 0) {
@@ -4514,6 +4676,9 @@ public final class GlslTranslator {
 		}
 
 		this.wynncraftTextBoost = this.packMainName >= 0;
+        Output first = this.packOutputs.get(0);
+        this.clampBackground = this.wynnBackground && this.wynncraftTextBoost
+                && (this.legacySlotZero || (first != null && WynncraftPatch.mayWriteAlpha(first.type()) && wholeAssignmentTo(first.name())));
 	}
 
 	/**
@@ -4575,7 +4740,8 @@ public final class GlslTranslator {
 				continue;
 			}
 
-			int stop = this.tokens.statementEnd(index);
+			int start = this.tokens.statementStart(index);
+			int stop = start < 0 ? -1 : this.tokens.statementEnd(start);
 			String variable = stop < 0 ? null : overlayVariable(index, stop);
 			if (variable != null) {
 				overlay = new Anchor(variable, stop, true);
@@ -4686,6 +4852,32 @@ public final class GlslTranslator {
 	 * counts. The declaration itself is gone from the body by now, lifted into the header, so
 	 * every use the walk meets is a read or a write and never a declaration.
 	 */
+	private boolean patchPackedLight(String output) {
+		boolean patched = false;
+		int[] lines = this.tokens.lineNumbers();
+		for (int i = 0; i < this.tokens.size(); i++) {
+			if (!this.tokens.get(i).identifier("pack_unorm_2x8") || !this.unit.isLive(lines[i])) {
+				continue;
+			}
+			int equals = this.tokens.significantBefore(i);
+			int member = this.tokens.significantBefore(equals);
+			int dot = this.tokens.significantBefore(member);
+			int target = this.tokens.significantBefore(dot);
+			int open = this.tokens.callOpener(i);
+			int close = open < 0 ? -1 : this.tokens.matchingBracket(open);
+			int end = this.tokens.significantAfter(close);
+			if (target < 0 || end < 0 || !this.tokens.get(target).identifier(output)
+					|| !this.tokens.get(dot).operator(".") || !this.tokens.get(member).identifier("w")
+					|| !this.tokens.get(equals).operator("=") || !this.tokens.get(end).operator(";")) {
+				continue;
+			}
+			this.tokens.inject(i, "wynnCorrectLight(pack_unorm_2x8");
+			this.tokens.inject(close, "))");
+			patched = true;
+		}
+		return patched;
+	}
+
 	private boolean wholeAssignmentTo(String name) {
 		int[] lines = this.tokens.lineNumbers();
 		for (int index = 0; index < this.tokens.size(); index++) {
@@ -4724,6 +4916,14 @@ public final class GlslTranslator {
 	private void takeDayClock() {
 		record(this.blockMembers, WynncraftPatch.DAY_CLOCK, "float " + WynncraftPatch.DAY_CLOCK);
 		this.injectedNames.add(WynncraftPatch.DAY_CLOCK);
+		for (String setting : List.of("wynnGlintBrightness", "wynnTintBrightness", "wynnEntityEmissivity")) {
+			record(this.blockMembers, setting, "float " + setting);
+			this.injectedNames.add(setting);
+		}
+		for (String skyId : List.of(WynncraftPatch.SKY_PRIMARY, WynncraftPatch.SKY_RECENT)) {
+			record(this.blockMembers, skyId, "int " + skyId);
+			this.injectedNames.add(skyId);
+		}
 	}
 
 	/**
@@ -4827,7 +5027,7 @@ public final class GlslTranslator {
 		boolean depth = namesClipPosition();
 		boolean overlay = this.inputs.overlay();
 		boolean lines = this.inputs == VertexInputs.LINES;
-		if (!terrain && !distant && !depth && !overlay && !lines) {
+		if (!terrain && !distant && !depth && !overlay && !lines && !this.wynnBackground) {
 			return;
 		}
 
@@ -6364,7 +6564,7 @@ public final class GlslTranslator {
 			this.packBuiltinCalls, this.mainWrapped, this.depthEpilogue, this.terrainPrologue,
 			this.distantPrologue, this.entityWrapped, this.linesWrapped, this.alphaEpilogue, this.covers,
 			wrapsFragment(), this.ordered, this.namesFragDepth, this.makesOverlayColour,
-			this.wynncraftAnchor >= 0, this.wynncraftTextBoost, this.coreProfile);
+			this.wynncraftAnchor >= 0, this.wynncraftTextBoost, this.clampBackground, this.coreProfile);
 	}
 
 	/**

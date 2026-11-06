@@ -62,15 +62,18 @@ public final class PackProgram {
 	/**
 	 * The names the engine has to have an answer about before its first frame, and which it
 	 * therefore reads out of the pack's text rather than out of a program that may not be read
-	 * yet. Both are things paid for every frame and useful only to a pack that reads them.
+	 * yet. Each is a thing paid for every frame and useful only to a pack that reads it.
 	 * <p>
 	 * {@code watershadow} rides with {@code shadowtex1} because it is what moves the meaning of
 	 * the bare {@code shadow}: a program declaring it reads the map WITHOUT the translucents
 	 * under that name, so a pack writing it is a pack that may want the copy even though it
 	 * never spells {@code shadowtex1} ({@code SamplerPlan.withoutTranslucents}).
+	 * <p>
+	 * {@code dhDepthTex} stands for all three of the far terrain's names, each of which it is the
+	 * start of: the match is plain text, so a pack spelling {@code dhDepthTex1} writes it too.
 	 */
 	private static final Set<String> SETTLED_EARLY =
-			Set.of("shadowtex1", "watershadow", "depthtex2");
+			Set.of("shadowtex1", "watershadow", "depthtex2", "dhDepthTex");
 
 	/** The one name of the format the game's clouds are drawn under. */
 	private static final String CLOUD_PROGRAM = "gbuffers_clouds";
@@ -1063,6 +1066,7 @@ public final class PackProgram {
 	public static Distant loadDistant(OpenedPack pack, String place, List<GeometryElement> elements)
 			throws IOException {
 		for (GeometryElement element : elements) {
+
 			if (element.inputs() != VertexInputs.DISTANT) {
 				throw new IllegalArgumentException("The far terrain is drawn from Distant Horizons' own "
 						+ "mesh, so " + element.inputs() + " is not a contract its programs may be "
@@ -1411,10 +1415,27 @@ public final class PackProgram {
 		Map<String, Loaded> translated = new LinkedHashMap<>();
 		Map<String, Loaded> loaded = new LinkedHashMap<>();
 		for (GeometryElement element : elements) {
+			if (element.element().equals("wynn_vfx")) {
+				var existing = resolver.lookup(place, element.program());
+				if (existing.isEmpty() || !existing.get().servedBy().equals(element.program())) {
+					var units = dev.wynnvitrail.WynnVfx.program(targets.allocated().contains(13));
+					loaded.put(element.element(), bind(source.packName(), "wynn_vfx",
+							ProgramTranslator.translate(units, element.inputs(), element.bound(), element.alphaTest(),
+									false, element.program(), textures.volumes()), targets, element.alphaTest(), textures));
+				}
+				continue;
+			}
 			Optional<ProgramResolver.Resolution> resolution =
 					resolver.lookup(place, element.program());
 			if (resolution.isEmpty()) {
-				continue;
+				if (element.inputs() == VertexInputs.GLYPH && element.bound().contains("UV0")
+                        && !element.program().startsWith("shadow") && dev.wynnvitrail.WynncraftSettings.effects()) {
+                    var units = dev.wynnvitrail.WynnGlyphFallback.program();
+                    loaded.put(element.element(), bind(source.packName(), "wynn_text",
+                            ProgramTranslator.translate(units, element.inputs(), element.bound(), element.alphaTest(),
+                                    false, element.program(), textures.volumes()), targets, element.alphaTest(), textures));
+                }
+                continue;
 			}
 
 			// The name the override is written under is the file that really serves the piece and
@@ -1476,12 +1497,14 @@ public final class PackProgram {
 			// alone would hand a name plate's background the module built for a glyph, which
 			// declares a texture coordinate the background's buffer has not got.
 			VertexInputs inputs = element.inputs();
-			String key = path + "|" + alphaTest + "|" + LegacyGlsl.drawsEntities(element.program())
+            boolean background = element.element().startsWith("wynn_bg_") && units.size() == 2;
+            String translationName = background ? element.program() + "#wynn_bg" : element.program();
+            String key = background + "|" + path + "|" + alphaTest + "|" + LegacyGlsl.drawsEntities(element.program())
 					+ "|" + LegacyGlsl.bindsGameTransforms(element.program()) + "|" + inputs
 					+ "|" + String.join(",", element.bound()) + "|" + element.coverage();
 			translated.computeIfAbsent(key, _ -> bind(source.packName(), path,
 					ProgramTranslator.translate(units, inputs, element.bound(), alphaTest,
-							element.coverage(), element.program(), textures.volumes()),
+							element.coverage(), translationName, textures.volumes()),
 					targets, alphaTest, textures));
 			loaded.put(element.element(), translated.get(key));
 		}

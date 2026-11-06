@@ -112,6 +112,10 @@ final class TargetSurface implements AutoCloseable {
 	}
 
 	/** Whether the levels past the base have been written since this texture was allocated. */
+	boolean reusable(GpuFormat requested, boolean mipmaps, boolean writable, int w, int h) {
+		return texture != null && format == requested && mipped == mipmaps && storage == writable && width == w && height == h;
+	}
+
 	boolean chainWritten() {
 		return this.chainWritten;
 	}

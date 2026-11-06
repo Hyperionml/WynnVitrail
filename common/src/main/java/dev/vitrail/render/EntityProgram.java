@@ -186,6 +186,7 @@ final class EntityProgram extends FamilyProgram {
 				// it is a decal. The two questions are asked in this order and not folded together:
 				// the map's refusal is about the target, the lookup is about the program name.
 				shadow ? Optional.<BlendFunction>empty()
+						: element.element().equals("wynn_vfx") && targets.has(13) ? Optional.of(BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA)
 						: BlendFunctions.of(ProgramFallbacks.blendOverride(element.program()),
 								GraphicsApi.colorTarget(game).blendFunction()),
 				// covers: the mask on every piece drawn before the seed and on no other, which is

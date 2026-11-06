@@ -45,6 +45,11 @@ public final class EntityIdentifiers {
 
 	private static volatile int item = NONE;
 
+	private static int itemFlags;
+
+	public static int itemFlags() { return itemFlags; }
+	public static void itemFlags(int flags) { itemFlags = flags; }
+
 	private EntityIdentifiers() {
 	}
 
@@ -85,7 +90,7 @@ public final class EntityIdentifiers {
 	public static long packed() {
 		return (entity & LANE_MASK)
 				| ((blockEntity & LANE_MASK) << LANE)
-				| ((item & LANE_MASK) << (2 * LANE));
+				| ((item & LANE_MASK) << (2 * LANE)) | ((long) itemFlags << (3 * LANE));
 	}
 
 	/** Puts back what {@link #packed} took, while a submission is turned into vertices. */
@@ -93,6 +98,7 @@ public final class EntityIdentifiers {
 		// Sign extended back out of the lane, so that the -1 a table answers for an unmapped name is
 		// still -1 here and is turned into 0xFFFF once, by the short that is written on the vertex.
 		// Keeping it as 65535 from here on would be the same bytes and a different number in the log.
+		itemFlags = (int) (packed >>> (3 * LANE));
 		entity = (short) packed;
 		blockEntity = (short) (packed >>> LANE);
 		item = (short) (packed >>> (2 * LANE));
@@ -100,6 +106,7 @@ public final class EntityIdentifiers {
 
 	/** Drops all three, at the end of every submission and at the frame boundary. */
 	public static void clear() {
+		itemFlags = 0;
 		entity = NONE;
 		blockEntity = NONE;
 		item = NONE;

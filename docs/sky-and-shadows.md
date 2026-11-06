@@ -470,6 +470,11 @@ own sky, the two elements the game pushes nothing for, keep the frame's matrix, 
 The game's sky pipeline declares **no depth-stencil state at all**. A pack program handed the
 ordinary state would write the sky into the depth buffer, and the world would then test against it.
 
+The coverage mask follows from it. A piece that claims its pixels writes the far plane there, which
+is what the depth buffer still holds under the sky, and not the depth of its own fragment: the disc
+stands sixteen blocks over the eye, and recorded at that depth it cut away everything the game drew
+behind it, the core of a beacon beam above that height first among them.
+
 And the sky disc's topology is a triangle fan, not quads. Any program substituted into a pass the
 game opened inherits that pass's topology, so the geometry family has to answer it rather than
 assume the terrain's.
@@ -679,6 +684,20 @@ draw their own, volumetric, in a composite. Complementary goes further and ships
 `gbuffers_clouds` that discards outright unless its own cloud style is set to the vanilla one. A
 pack whose vanilla clouds vanish when this is switched on is usually getting what it asked for, and
 the pack to judge the work on is one that asks for nothing.
+
+**Distant Horizons draws clouds of its own, and `dhClouds` is the word for those.** They are a
+generic object of that mod's, out past the world's own, drawn by DH and lit by nothing of the
+pack's, so `clouds` never reaches them. The answer is Iris's (`compat/dh/DHCompatInternal.java:290`):
+they are kept out where the pack writes `dhClouds=off`, and where it writes no `dhClouds` at all they
+follow `clouds`, so a pack that switched the game's clouds off for clouds of its own is not handed
+DH's over them. A pack that writes `dhClouds=on` keeps them whatever `clouds` says: the line has words
+of its own, `off`, or `on` and `fancy` for the same thing, and `fast` is not one of them
+(`shaderpack/properties/ShaderProperties.java:170-178`). Complementary writes `dhClouds = off` under
+DH. They are held off through DH's own
+published switch for them, set beside the player's value rather than over it and cleared with the
+pack, where Iris cancels the object in a render event of DH's that this engine cannot subclass. Left
+on, they were the one bright thing in the sky under blindness, the pack's own clouds going black
+there as they should.
 
 ### Where the clouds land in the frame
 

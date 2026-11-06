@@ -364,6 +364,10 @@ public final class TargetSchedule {
 	 * back. Kept rather than derived from the last step: the last step is the final today and the
 	 * derivation would break in silence the day a pack ships none.
 	 */
+	public Side sideAfterDeferred(int target) {
+		return this.afterDeferred.contains(target) ? Side.ALT : Side.MAIN;
+	}
+
 	public Set<Integer> flippedAtEnd() {
 		return this.flippedAtEnd;
 	}

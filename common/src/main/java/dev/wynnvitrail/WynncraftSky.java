@@ -195,6 +195,8 @@ public final class WynncraftSky {
 	 * @param dt how long the frame took, in seconds, as the frame state measured it
 	 */
 	public static void advance(float dt) {
+		paintedId = 0;
+		paintedThisFrame = false;
 		if (!WynncraftSettings.effects()) {
 			forget();
 			return;
@@ -293,6 +295,25 @@ public final class WynncraftSky {
 	 * cave, and a session whose domes have all been culled have in common, and every reader of this
 	 * is expected to leave the picture alone for it.
 	 */
+	private static int paintedId;
+	private static boolean paintedThisFrame;
+
+	public static void setPaintedId(int value) {
+		paintedId = value;
+		if (value != 0) {
+			paintedThisFrame = true;
+		}
+	}
+
+	/** WynnIris samples Mode once per frame. A sky draw selects sky mode for the rest of that frame. */
+	public static boolean shouldTintScene() {
+		return !paintedThisFrame && id > 0 && fade > 0.001F;
+	}
+
+	public static int paintedId() {
+		return paintedId == id ? paintedId : 0;
+	}
+
 	public static int id() {
 		return id;
 	}
@@ -310,7 +331,7 @@ public final class WynncraftSky {
 
 	/** The identity just left, kept out of the detection while its grace runs. */
 	public static int recentId() {
-		return recentId;
+		return grace > 0.0F ? recentId : 0;
 	}
 
 	/**
@@ -354,11 +375,11 @@ public final class WynncraftSky {
 	 * @return the multiplier an entity's colour is taken up by
 	 */
 	public static float entityBoost(float nightVision, boolean hand) {
-		if (hand || !isDark() || nightVision > NIGHT_VISION_SEES) {
+		if (hand || !isDark() || (WynnOption.NIGHT.enabled() && nightVision > NIGHT_VISION_SEES)) {
 			return 1.0F;
 		}
 
-		return 1.0F + BOOST_AT_FULL_STRENGTH * fade;
+		return 1.0F + BOOST_AT_FULL_STRENGTH * fade * WynnOption.ENTITY.scale() * WynnOption.DARK.scale();
 	}
 
 	/** Whether the standing sky is one of the four whose scene is darkened. */
@@ -394,7 +415,7 @@ public final class WynncraftSky {
 			return 0.0F;
 		}
 
-		return Math.min(1.0F, Math.max(0.0F, fade));
+		return Math.min(1.0F, Math.max(0.0F, fade * WynnOption.ENTITY.scale() * WynnOption.DARK.scale()));
 	}
 
 	/** Forgets the identity, the fade and the grace. For a world or dimension change. */
@@ -411,6 +432,8 @@ public final class WynncraftSky {
 	 * to be re-read on.
 	 */
 	private static void forget() {
+		paintedId = 0;
+		paintedThisFrame = false;
 		preferredId = 0;
 		preferredDeltaY = Float.MAX_VALUE;
 		fallbackId = 0;
@@ -451,7 +474,6 @@ public final class WynncraftSky {
 			return;
 		}
 
-		Vitrail.logger().info("The Wynncraft sky is now {}: the scene under it is tinted from it "
-				+ "for as long as it stands.", after);
+		Vitrail.logger().info("The Wynncraft sky is now {}.", after);
 	}
 }

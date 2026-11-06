@@ -26,11 +26,13 @@ public abstract class ItemFeatureRendererMixin {
 	@Inject(method = "prepareSubmit", at = @At("HEAD"), require = 1)
 	private void vitrail$begin(CallbackInfo callback,
 			@Local(argsOnly = true) ItemFeatureRenderer.Submit submit) {
+		dev.wynnvitrail.WynnVfx.begin(submit.tintLayers());
 		EntityIdentifiers.restore(((SubmittedIdentifiers) (Object) submit).vitrail$identifiers());
 	}
 
 	@Inject(method = "prepareSubmit", at = @At("RETURN"), require = 1)
 	private void vitrail$end(CallbackInfo callback) {
+		dev.wynnvitrail.WynnVfx.end();
 		EntityIdentifiers.clear();
 	}
 }

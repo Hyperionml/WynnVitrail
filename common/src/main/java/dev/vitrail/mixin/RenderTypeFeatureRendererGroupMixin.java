@@ -83,8 +83,9 @@ public abstract class RenderTypeFeatureRendererGroupMixin {
 	private void vitrail$breakTheRun(RenderType renderType,
 			CallbackInfoReturnable<VertexConsumer> callback) {
 		if (this.lastDraw != null && EntityDraw.wanted()
-				&& ((BlockEntityOrigin) this.lastDraw).vitrail$fromBlockEntity()
-						!= BlockEntityGeometry.building()) {
+				&& (((BlockEntityOrigin) this.lastDraw).vitrail$fromBlockEntity() != BlockEntityGeometry.building()
+					|| ((BlockEntityMark) this.lastDraw).vitrail$textBackground() != dev.wynnvitrail.WynnTextBackground.building
+					|| ((BlockEntityMark) this.lastDraw).vitrail$vfx() != dev.wynnvitrail.WynnVfx.building())) {
 			this.lastDraw = null;
 		}
 	}
@@ -101,6 +102,8 @@ public abstract class RenderTypeFeatureRendererGroupMixin {
 		StagedVertexBuffer.Draw draw = original.call(buffer, format, topology, sorting);
 		((BlockEntityMark) draw).vitrail$fromBlockEntity(BlockEntityGeometry.building());
 
+		((BlockEntityMark) draw).vitrail$textBackground(dev.wynnvitrail.WynnTextBackground.building);
+		((BlockEntityMark) draw).vitrail$vfx(dev.wynnvitrail.WynnVfx.building());
 		return draw;
 	}
 
@@ -114,6 +117,8 @@ public abstract class RenderTypeFeatureRendererGroupMixin {
 
 		// Minus one rather than a search for a later match with the right origin: the two are the
 		// same picture and one of them is a draw more, on a pair that is rare to begin with.
+		if (((BlockEntityMark) this.draws.get(found)).vitrail$textBackground() != dev.wynnvitrail.WynnTextBackground.building) return -1;
+		if (((BlockEntityMark) this.draws.get(found)).vitrail$vfx() != dev.wynnvitrail.WynnVfx.building()) return -1;
 		return ((BlockEntityOrigin) this.draws.get(found)).vitrail$fromBlockEntity()
 				== BlockEntityGeometry.building() ? found : -1;
 	}

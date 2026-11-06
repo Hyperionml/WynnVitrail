@@ -1,6 +1,7 @@
 package dev.wynnvitrail;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -152,6 +153,7 @@ class WynncraftSkyTest {
 			// The grace is ten seconds of world time, and the frames above spent half a second of
 			// it. Six hundred more takes it past the end.
 			idleFrames(600);
+			assertEquals(0, WynncraftSky.recentId(), "an expired dome must be renderable again");
 			noteFrames(1, 3);
 
 			assertEquals(3, WynncraftSky.id(),
@@ -305,6 +307,23 @@ class WynncraftSkyTest {
 			WynncraftSky.note(skyId, PRIMARY_Y);
 			WynncraftSky.advance(FRAME);
 		}
+	}
+
+	@Test
+	void skyPaintPreventsASecondTerrainTintOnlyInTheSameFrame() {
+		withPatch(true, () -> {
+			noteFrames(1, 7);
+			assertTrue(WynncraftSky.shouldTintScene());
+			WynncraftSky.setPaintedId(7);
+			assertFalse(WynncraftSky.shouldTintScene());
+			// A second render target may fail to paint after the main target succeeded.
+			WynncraftSky.setPaintedId(0);
+			assertFalse(WynncraftSky.shouldTintScene());
+			noteFrames(1, 7);
+			assertTrue(WynncraftSky.shouldTintScene());
+			WynncraftSky.reset();
+			assertFalse(WynncraftSky.shouldTintScene());
+		});
 	}
 
 	/** The same with nothing detected, which is what a frame that submits no dome looks like. */

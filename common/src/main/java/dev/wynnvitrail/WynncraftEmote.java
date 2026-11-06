@@ -181,20 +181,30 @@ final class WynncraftEmote {
 
 			    pos.y = mod(pos.y, float(WYNN_EMOTE_Y_RADIX)) - (float(WYNN_EMOTE_Y_RADIX) / 2.0 - 1.0);
 
-			    int face = (gl_VertexID % 24) / 4;
-			    int overlay = (gl_VertexID / 24) % 2;
+			    // MidTexCoord belongs to the primitive. Vulkan vertex indices also include the
+			    // staged draw's baseVertex, which need not start on a head or hat boundary.
+			    vec2 headPixel = MidTexCoord * WYNN_EMOTE_SKIN_SIZE;
+			    int overlay = int(headPixel.x >= 32.0);
+			    headPixel.x -= float(overlay) * 32.0;
+			    int face;
+			    if (headPixel.y > 0.0 && headPixel.y < 8.0 && headPixel.x > 8.0 && headPixel.x < 24.0) {
+			        face = int(headPixel.x >= 16.0);
+			    } else if (headPixel.y > 8.0 && headPixel.y < 16.0 && headPixel.x > 0.0 && headPixel.x < 32.0) {
+			        face = 2 + int(headPixel.x / 8.0);
+			    } else {
+			        // A writer without a primitive midpoint uses the original WynnIris layout.
+			        overlay = (gl_VertexID / 24) % 2;
+			        face = (gl_VertexID % 24) / 4;
+			        float baseU = uv.x - float(overlay) * 0.5;
+			        if (face == WYNN_EMOTE_FACE_RIGHT && baseU >= 0.25) face = WYNN_EMOTE_FACE_LEFT;
+			        else if (face == WYNN_EMOTE_FACE_LEFT && baseU < 0.25) face = WYNN_EMOTE_FACE_RIGHT;
+			    }
 
 			    int limbUvOffset = steveAlex == 0 ? WYNN_EMOTE_STEVE_OFFSETS[limbIndex] : WYNN_EMOTE_ALEX_OFFSETS[limbIndex];
 			    wynnLimbUv limbUv = WYNN_EMOTE_LIMB_UVS[limbIndex + limbUvOffset];
 			    wynnLimbUv headUv = WYNN_EMOTE_LIMB_UVS[0];
 
 			    uv -= float(overlay) * headUv.overlayOffset * WYNN_EMOTE_SKIN_SIZE_INV;
-
-			    float faceDivideX = (headUv.faceOrigins[WYNN_EMOTE_FACE_RIGHT].x + headUv.faceOrigins[WYNN_EMOTE_FACE_LEFT].x) / 2.0;
-			    int divide = int(uv.x >= faceDivideX * WYNN_EMOTE_SKIN_SIZE_INV);
-
-			    face += divide * int(face == WYNN_EMOTE_FACE_RIGHT) * (WYNN_EMOTE_FACE_LEFT - WYNN_EMOTE_FACE_RIGHT);
-			    face -= (1 - divide) * int(face == WYNN_EMOTE_FACE_LEFT) * (WYNN_EMOTE_FACE_LEFT - WYNN_EMOTE_FACE_RIGHT);
 
 			    vec2 sizeRatio = limbUv.faceSizes[face] / headUv.faceSizes[face];
 			    vec2 originOffset = limbUv.faceOrigins[face] - (headUv.faceOrigins[face] * sizeRatio);

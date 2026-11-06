@@ -242,6 +242,12 @@ public final class PackChoice {
 			}
 
 			Path pack = choose(packs, askedFor).orElse(null);
+			var ambience = dev.wynnvitrail.ambience.WynnAmbience.active();
+			if (pack != null && ambience != null) {
+				pack = packs.stream().filter(path -> path.getFileName().toString().equals(ambience.resolvedShaderPack()))
+						.findFirst().orElseThrow(() -> new IOException("Missing ambience shader pack: "
+								+ ambience.resolvedShaderPack()));
+			}
 			if (pack == null) {
 				// Both roads out of here draw nothing, so both take the meshes down, and only then are
 				// they told apart: what parts them is whether nothing was asked for or whether what was
@@ -295,6 +301,9 @@ public final class PackChoice {
 			// fourth, profile, never reaches here: the settings layer takes it out and carries it
 			// apart, because it is the side that writes it back into the pack's own file.
 			EngineOptions.Read engine = EngineOptions.take(chosen);
+			if (ambience != null && pack.getFileName().toString().equals(ambience.resolvedShaderPack()) && session != null) {
+				ambience.profile().applyOptions(chosen, settings.forcedNames(), session.declared());
+			}
 			packsFirst = engine.packsFirst();
 			PackChain.chainWanted(engine.chain());
 

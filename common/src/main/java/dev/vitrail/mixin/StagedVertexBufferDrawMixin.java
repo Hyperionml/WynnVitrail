@@ -23,6 +23,14 @@ public abstract class StagedVertexBufferDrawMixin implements BlockEntityMark {
 	@Unique
 	private boolean vitrail$blockEntity;
 
+	@Unique private boolean vitrail$textBackground;
+    @Override public boolean vitrail$textBackground() { return vitrail$textBackground; }
+    @Override public void vitrail$textBackground(boolean value) { vitrail$textBackground = value; }
+
+    @Unique private boolean vitrail$vfx;
+	@Override public boolean vitrail$vfx() { return vitrail$vfx; }
+	@Override public void vitrail$vfx(boolean value) { vitrail$vfx = value; }
+
 	@Override
 	public boolean vitrail$fromBlockEntity() {
 		return this.vitrail$blockEntity;

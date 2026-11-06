@@ -72,19 +72,6 @@ final class WynncraftGlint {
 	 */
 	static final String SAMPLER = "wynnTex";
 
-	/**
-	 * What the effects are allowed to be worth, which is WynnIris's pair of Iris settings at their
-	 * defaults.
-	 * <p>
-	 * The glint's is above one, so a shiny weapon's highlight is brighter than its texture; the
-	 * tint's is below one, so a tinted piece settles darker than the tint's own colour. Both are the
-	 * shipped values and not round numbers, which is why they are named rather than folded into the
-	 * two expressions that read them.
-	 */
-	private static final String BRIGHTNESS =
-			"const float wynnGlintBrightness = 1.10;\n"
-			+ "const float wynnTintBrightness = 0.75;";
-
 	/** A colour written the way the pack lists effects write one, in bytes out of two hundred and fifty-five. */
 	private static final String RGB =
 			"vec3 wynnRgb(int r, int g, int b) {"
@@ -405,16 +392,16 @@ final class WynncraftGlint {
 			+ "\t\t\tbreak;\n"
 			+ "\t\t}\n"
 			// The ten tints, in the server's own order.
-			+ "\t\tcase 15: { iW_out = wynnTintEffect(wynnRgb(80,  130, 230), iW_tex); break; }\n"
-			+ "\t\tcase 16: { iW_out = wynnTintEffect(wynnRgb(30,  230, 130), iW_tex); break; }\n"
-			+ "\t\tcase 17: { iW_out = wynnTintEffect(wynnRgb(235, 70,  70 ), iW_tex); break; }\n"
-			+ "\t\tcase 18: { iW_out = wynnTintEffect(wynnRgb(100, 190, 190), iW_tex); break; }\n"
-			+ "\t\tcase 19: { iW_out = wynnTintEffect(wynnRgb(250, 120, 20 ), iW_tex); break; }\n"
-			+ "\t\tcase 20: { iW_out = wynnTintEffect(wynnRgb(50,  50,  50 ), iW_tex); break; }\n"
-			+ "\t\tcase 21: { iW_out = wynnTintEffect(wynnRgb(250, 230, 230), iW_tex); break; }\n"
-			+ "\t\tcase 22: { iW_out = wynnTintEffect(wynnRgb(255, 150, 200), iW_tex); break; }\n"
-			+ "\t\tcase 23: { iW_out = wynnTintEffect(wynnRgb(200, 60,  230), iW_tex); break; }\n"
-			+ "\t\tcase 24: { iW_out = wynnTintEffect(wynnRgb(240, 240, 80 ), iW_tex); break; }\n"
+			+ "\t\tcase 15: \n"
+			+ "\t\tcase 16: \n"
+			+ "\t\tcase 17: \n"
+			+ "\t\tcase 18: \n"
+			+ "\t\tcase 19: \n"
+			+ "\t\tcase 20: \n"
+			+ "\t\tcase 21: \n"
+			+ "\t\tcase 22: \n"
+			+ "\t\tcase 23: \n"
+			+ "\t\tcase 24: { iW_out = wynnTintEffect(wynnEffectTint(iW_id), iW_tex); break; }\n"
 			// The seven coloured shines, which are the first effect in white and in six hues.
 			+ "\t\tcase 25: { iW_out = wynnShiny(wynnRgb(255, 255, 255), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }\n"
 			+ "\t\tcase 26: { iW_out = wynnShiny(wynnRgb(85,  255, 85 ), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }\n"
@@ -466,7 +453,7 @@ final class WynncraftGlint {
 	 * the failure naming the pack's own file.
 	 */
 	static final String[] HELPERS = {
-		BRIGHTNESS, RGB, HSV_TO_RGB, RANDOM_FLOAT, RANDOM_VEC2, NOISE, SMOOTH_NOISE, ROTATE, SMOOTHEN,
+		RGB, HSV_TO_RGB, RANDOM_FLOAT, RANDOM_VEC2, NOISE, SMOOTH_NOISE, ROTATE, SMOOTHEN,
 		BLEND, GRAYSCALE, TINT, ABERRATION, SHINY, TINT_EFFECT, CONTINUOUS_SWEEP_UV, APPLY};
 
 	/**

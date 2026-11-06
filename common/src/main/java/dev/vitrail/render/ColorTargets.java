@@ -98,7 +98,8 @@ final class ColorTargets {
 	 * <p>
 	 * A float and nothing narrower because the comparison is for equality as much as for order. The
 	 * game's depth attachment is {@code D32_FLOAT} ({@code RenderTarget.createBuffers}), the mask is
-	 * filled from the very value the fragment stage hands that attachment, and both sides then carry
+	 * filled from the very value the fragment stage hands that attachment (the sky, which hands it
+	 * none, writes the clear it stands over), and both sides then carry
 	 * the same thirty two bits: a pixel nothing has been drawn over compares exactly equal. Rounded
 	 * into a narrower format it would not, and the seed would repaint the pack's own geometry
 	 * wherever the rounding fell the wrong way.
@@ -544,6 +545,16 @@ final class ColorTargets {
 	boolean refusedForGood() {
 		return this.brokenForGood;
 	}
+
+	void resetCloudHistory(CommandEncoder encoder, int index, Vector4fc value) {
+		for (var surfaces : List.of(this.mainSide, this.altSide)) {
+			TargetSurface surface = surfaces.get(index);
+			if (surface == null) continue;
+			takeClear(surface.view());
+			clear(encoder, surface, value);
+		}
+	}
+
 
 	/**
 	 * Records the emptying that the main and the alternate surface of each target the pack asked to
@@ -1034,9 +1045,48 @@ final class ColorTargets {
 		this.storageImages.reanchor(encoder, dx, dy, dz);
 	}
 
+	private static final java.util.ArrayDeque<TargetSurface> ambienceSurfaces = new java.util.ArrayDeque<>();
+	private static long pooledBytes;
+	private static final long POOL_LIMIT = 256L << 20;
+
+	private static void recycle(TargetSurface surface) {
+		long bytes = surface.bytes();
+		if (!dev.wynnvitrail.ambience.WynnAmbience.switching() || bytes > POOL_LIMIT) {
+			surface.close();
+			return;
+		}
+		while (pooledBytes + bytes > POOL_LIMIT || ambienceSurfaces.size() >= 64) {
+			var oldest = ambienceSurfaces.removeFirst();
+			pooledBytes -= oldest.bytes();
+			oldest.close();
+		}
+		surface.chainWritten(false);
+		ambienceSurfaces.addLast(surface);
+		pooledBytes += bytes;
+	}
+
+	static void closeAmbienceSurfaces() {
+		ambienceSurfaces.forEach(TargetSurface::close);
+		ambienceSurfaces.clear();
+		pooledBytes = 0;
+	}
+
+	private static TargetSurface obtain(String label, GpuFormat format, boolean mipped, boolean storage, int width, int height) {
+		var it = ambienceSurfaces.descendingIterator();
+		while (it.hasNext()) {
+			var surface = it.next();
+			if (surface.reusable(format, mipped, storage, width, height)) {
+				it.remove();
+				pooledBytes -= surface.bytes();
+				return surface;
+			}
+		}
+		return new TargetSurface(label, format, mipped, storage, width, height);
+	}
+
 	void release() {
-		this.mainSide.values().forEach(TargetSurface::close);
-		this.altSide.values().forEach(TargetSurface::close);
+		this.mainSide.values().forEach(ColorTargets::recycle);
+		this.altSide.values().forEach(ColorTargets::recycle);
 		this.mainSide.clear();
 		this.altSide.clear();
 
@@ -1332,7 +1382,7 @@ final class ColorTargets {
 					format, width, height, TargetSurface.levelsFor(mipped, width, height),
 					directives.format(index).declared(), directives.formatSource(index),
 					storage ? ", writable as a storage image" : "");
-			side.put(index, new TargetSurface("Vitrail " + name, format, mipped, storage, width,
+			side.put(index, obtain("Vitrail " + name, format, mipped, storage, width,
 					height));
 		} else {
 			surface.resize(width, height);

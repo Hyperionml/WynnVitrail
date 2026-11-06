@@ -1,5 +1,6 @@
 package dev.vitrail.sodium;
 
+import dev.wynnvitrail.WynnOption;
 import dev.vitrail.cache.ModuleCache;
 import dev.vitrail.HostReport;
 import dev.vitrail.IrisBeside;
@@ -130,6 +131,30 @@ public final class ConfigEntry implements ConfigEntryPoint {
 		// settings, and the rescue choice below is only read after a startup that crashed, so nothing
 		// here is needed to get back to Vulkan. The device is up by this walk.
 		if (!HostReport.otherBackend()) {
+			options.addPage(builder.createExternalPage().setName(Component.literal("Ambience packs"))
+					.setScreenConsumer(parent -> Minecraft.getInstance().gui.setScreen(new dev.wynnvitrail.ambience.AmbienceScreen(parent))));
+			var wynnGroup = builder.createOptionGroup();
+			for (WynnOption option : WynnOption.values()) {
+				Identifier id = Identifier.fromNamespaceAndPath(Vitrail.MOD_ID, "wynn/" + option.name().toLowerCase(java.util.Locale.ROOT));
+				if (option.max == 1) {
+					wynnGroup.addOption(builder.createBooleanOption(id)
+							.setName(Component.translatable("options.wynnvitrail." + option.key))
+							.setTooltip(_ -> Component.translatable("options.wynnvitrail." + option.key + ".tooltip"))
+							.setDefaultValue(option.initial != 0)
+							.setBinding(value -> option.set(value ? 1 : 0), option::enabled)
+							.setStorageHandler(() -> {}));
+				} else {
+					wynnGroup.addOption(builder.createIntegerOption(id)
+							.setName(Component.translatable("options.wynnvitrail." + option.key))
+							.setTooltip(_ -> Component.translatable("options.wynnvitrail." + option.key + ".tooltip"))
+							.setDefaultValue(option.initial)
+							.setRange(new Range(option.min, option.max, option.step))
+							.setValueFormatter(value -> Component.literal(Integer.toString(value)))
+							.setBinding(option::set, option::value)
+							.setStorageHandler(() -> {}));
+				}
+			}
+			options.addPage(builder.createOptionPage().setName(Component.literal("Wynncraft")).addOptionGroup(wynnGroup));
 			options.addPage(builder.createOptionPage()
 					.setName(Component.translatable(ScreenText.PAGE_TITLE))
 					.addOptionGroup(builder.createOptionGroup()

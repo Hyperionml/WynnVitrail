@@ -211,7 +211,7 @@ public abstract class BufferBuilderMixin {
 			MemoryUtil.memPutShort(identifiers, (short) EntityIdentifiers.entity());
 			MemoryUtil.memPutShort(identifiers + 2L, (short) EntityIdentifiers.blockEntity());
 			MemoryUtil.memPutShort(identifiers + 4L, (short) EntityIdentifiers.item());
-			MemoryUtil.memPutShort(identifiers + 6L, (short) 0);
+			MemoryUtil.memPutShort(identifiers + 6L, (short) EntityIdentifiers.itemFlags());
 		}
 
 		if (this.vitrail$midBlock >= 0) {
