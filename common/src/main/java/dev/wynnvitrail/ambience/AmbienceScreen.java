@@ -31,7 +31,7 @@ public final class AmbienceScreen extends Screen {
     private int candidateIndex;
 
 	public AmbienceScreen(Screen parent) {
-		super(Component.literal("Ambience packs"));
+		super(Component.translatable("options.wynnvitrail.wynncraftAmbiencePackSelection.title"));
 		this.parent = parent;
 	}
 

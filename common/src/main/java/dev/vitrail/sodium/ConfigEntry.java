@@ -131,7 +131,8 @@ public final class ConfigEntry implements ConfigEntryPoint {
 		// settings, and the rescue choice below is only read after a startup that crashed, so nothing
 		// here is needed to get back to Vulkan. The device is up by this walk.
 		if (!HostReport.otherBackend()) {
-			options.addPage(builder.createExternalPage().setName(Component.literal("Ambience packs"))
+			options.addPage(builder.createExternalPage()
+					.setName(Component.translatable("options.wynnvitrail.wynncraftAmbiencePackSelection.title"))
 					.setScreenConsumer(parent -> Minecraft.getInstance().gui.setScreen(new dev.wynnvitrail.ambience.AmbienceScreen(parent))));
 			var wynnGroup = builder.createOptionGroup();
 			for (WynnOption option : WynnOption.values()) {
