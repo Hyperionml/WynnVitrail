@@ -1,6 +1,7 @@
 package dev.vitrail.render;
 
 import dev.wynnvitrail.WynnOption;
+import dev.vitrail.SodiumTerrainOffset;
 import dev.vitrail.dh.DhDepth;
 import dev.vitrail.pack.id.NameIds;
 import dev.vitrail.pack.model.RenderStage;
@@ -103,6 +104,13 @@ public final class FrameState implements WorldState {
 	/** Refilled every frame by the reading of Distant Horizons, and never read outside it. */
 	private final Vector2f distantPlanes = new Vector2f();
 	private final CameraShift shift = new CameraShift();
+
+	/**
+	 * What a chunk pass takes off its region offset, written once a frame beside the shift and read
+	 * by every chunk program of it. Nought unless the Sodium in front leaves the fraction out, which
+	 * is {@link SodiumTerrainOffset}'s to say.
+	 */
+	private final Vector3f sodiumCameraOffset = new Vector3f();
 
 	private PackDirectives directives = PackDirectives.defaults();
 
@@ -377,6 +385,11 @@ public final class FrameState implements WorldState {
 		// give both of them a lag that only shows while the player moves.
 		this.shift.advance(cameraState.pos);
 
+		// Beside the shift and not after it, because it is read off the same position: the fraction
+		// Sodium left out of a region offset is the fraction of the camera it measured that offset
+		// from, and the shifted one differs from it by whole blocks, which is no part of a fraction.
+		SodiumTerrainOffset.write(this.shift.unshifted(), this.sodiumCameraOffset);
+
 		readWorld(level, camera);
 		readFog(cameraState);
 		readPlayer(minecraft, level, camera);
@@ -409,6 +422,7 @@ public final class FrameState implements WorldState {
 	public void reset() {
 		this.view.reset();
 		this.shift.reset();
+		this.sodiumCameraOffset.set(0.0F, 0.0F, 0.0F);
 		FrameSmoothed.forgetAll();
 		this.timed = false;
 		this.frameCounter = 0;
@@ -1330,6 +1344,11 @@ public final class FrameState implements WorldState {
 	@Override
 	public Vector3dc previousCameraPositionUnshifted() {
 		return this.shift.previousUnshifted();
+	}
+
+	@Override
+	public Vector3fc sodiumCameraOffset() {
+		return this.sodiumCameraOffset;
 	}
 
 	// world
