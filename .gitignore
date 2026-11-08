@@ -10,6 +10,9 @@ run/
 runs/
 */runs/
 
+# The dev client also writes a log archive beside common/, outside every run directory.
+common/logs/
+
 # IDE
 .idea/
 *.iml
