@@ -123,6 +123,11 @@ public final class EngineStages {
 	 */
 	public static void clientTickStart() {
 		SettingsKey.beforeTick();
+
+		// The release a world left behind owed, paid at the first moment no frame is in flight: a
+		// disconnect is handled inside a tick, and the HUD of that tick's frame is drawn after the
+		// world is gone. PackChain's owed field carries the whole of why.
+		PackChain.releaseOwed();
 	}
 
 	/**

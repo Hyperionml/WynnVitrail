@@ -147,6 +147,27 @@ public final class PackChain {
 
 	private static volatile boolean chainWanted = true;
 
+	/**
+	 * The chain whose release a world left behind owed, and that is still owed.
+	 * <p>
+	 * <strong>The moment a release is asked for is not a moment a release can be paid at.</strong>
+	 * {@link #leaveWorld} is reached from the head of {@code Minecraft.disconnect}, and a disconnect
+	 * is handled inside a tick rather than between two frames: the same tick goes on to render, and
+	 * the HUD of that frame is drawn after the world is gone. A mod that spreads HUD work over
+	 * several frames has a hand pass still to submit at that point - Gnetum wraps
+	 * {@code renderItemInHand} to do exactly that - and against targets this class has just freed it
+	 * asks the device for a pass whose colour attachment is the scaled one nobody owns any more and
+	 * whose depth is the window's. Vulkan refuses the pair by size rather than drawing something
+	 * wrong, which is the crash that put this field here.
+	 * <p>
+	 * So the release is owed and paid at the head of the next tick: after that frame has been
+	 * submitted and before the next one records anything. Both roads where the wait would be wrong
+	 * drop the debt instead of paying it. A chain taken down by a reload has already been released
+	 * by the reload, and a world joined again before the tick turns over is drawn from this very
+	 * chain and needs everything it holds.
+	 */
+	private static volatile PackChain owed;
+
 	/** Puts a chain up as the one the frame draws from, once the load has read it whole. */
 	static void activate(PackChain chain) {
 		active = chain;
@@ -1289,6 +1310,11 @@ public final class PackChain {
 
 	/** Called when the client shuts down, while the device is still alive. */
 	public static void close() {
+		// A debt is dropped rather than paid here: the chain it names is the one taken down below,
+		// so the release that follows is the release it was owed, and paying it twice would free a
+		// second time what nothing owns any more.
+		owed = null;
+
 		// Taken down before it is released, and not merely released: after this nothing draws again,
 		// so a chain still answering as the live one would have the release announce that the next
 		// device purge carries its pipelines, when the next purge is the one inside the device's own
@@ -1312,7 +1338,8 @@ public final class PackChain {
 	}
 
 	/**
-	 * Called when the client leaves a world, on the render thread and between two frames.
+	 * Called when the client leaves a world, on the render thread, inside the tick that handled the
+	 * disconnect.
 	 * <p>
 	 * Nothing of this engine hearing about it leaves the whole of what a pack costs allocated for as
 	 * long as the player sits in the menu: the colour targets, the shadow map, the two
@@ -1343,6 +1370,43 @@ public final class PackChain {
 			return;
 		}
 
+		// Owed rather than paid, and the field says why: this runs inside the tick that handled the
+		// disconnect, and that tick still has a frame of HUD to submit against targets a release
+		// here would free. The four lines above touch nothing of the pack's, so only what costs the
+		// hundred megabytes waits.
+		owed = chain;
+	}
+
+	/**
+	 * Pays the release {@link #leaveWorld} owed, at the head of a tick.
+	 * <p>
+	 * The head of a tick is the first moment after a world was left at which nothing of a frame is
+	 * in flight: the frame of the tick that left it has been submitted, and the next one has
+	 * recorded nothing. That is what makes freeing the targets safe where freeing them a tick
+	 * earlier is not.
+	 *
+	 * @return whether the chain was released here, rather than the debt being dropped
+	 */
+	public static boolean releaseOwed() {
+		PackChain chain = owed;
+		if (chain == null) {
+			return false;
+		}
+
+		owed = null;
+
+		// A reload in the tick that left the world took this chain down and released it, so the
+		// name no longer means anything: paying it again would free what a new chain now owns.
+		if (chain != active) {
+			return false;
+		}
+
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft != null && minecraft.level != null) {
+			// A world was joined before the tick turned over, and this chain is drawing it.
+			return false;
+		}
+
 		try {
 			// The line is about what goes back, so it has to be able to say that nothing does. A
 			// chain that threw was released where it threw and a world left before a frame was drawn
@@ -1366,11 +1430,15 @@ public final class PackChain {
 			// NOT replaced on the way out, so nothing else would ever reset it, and a world joined
 			// again would be measured against where the player stood in the one they left.
 			chain.voxelAnchored = false;
+
+			return true;
 		} catch (GpuDeviceLossException e) {
 			throw e;
 		} catch (RuntimeException e) {
 			stop();
 			Vitrail.logger().error("Vitrail stopped drawing this pack after an error", e);
+
+			return false;
 		}
 	}
 
