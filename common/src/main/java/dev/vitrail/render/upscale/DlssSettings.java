@@ -8,7 +8,7 @@ import java.util.Properties;
 
 /** User preference is distinct from actual availability. Missing support keeps the FSR path. */
 public final class DlssSettings {
-	public enum Mode { FSR1, QUALITY, BALANCED, PERFORMANCE, DLAA }
+	public enum Mode { FSR1, QUALITY, BALANCED, PERFORMANCE, ULTRA_PERFORMANCE, DLAA }
 	private static volatile Mode mode = Mode.FSR1;
 	private static volatile String failure = "";
 	private static Path directory;
@@ -45,6 +45,7 @@ public final class DlssSettings {
 		return switch (mode) {
 			case BALANCED -> DlssBridge.Quality.BALANCED;
 			case PERFORMANCE -> DlssBridge.Quality.PERFORMANCE;
+			case ULTRA_PERFORMANCE -> DlssBridge.Quality.ULTRA_PERFORMANCE;
 			case DLAA -> DlssBridge.Quality.DLAA;
 			default -> DlssBridge.Quality.QUALITY;
 		};

@@ -46,6 +46,15 @@ public final class GameDlssDevice implements AutoCloseable, DlssDevices.Device {
 	private final DlssBridge bridge;
 	private DlssBridge.Session session;
 	private final Thread owner = Thread.currentThread();
+
+	/**
+	 * Formats already known to support a blit, remembered rather than asked again.
+	 * <p>
+	 * Every blit asked the physical device twice, and the answer cannot change while it lives.
+	 * Seven hundred of those a second is driver work on the render thread for nothing.
+	 */
+	private final Set<Integer> blitSources = ConcurrentHashMap.newKeySet();
+	private final Set<Integer> blitTargets = ConcurrentHashMap.newKeySet();
 	private @Nullable Dimensions dimensions;
 	private volatile boolean closed;
 	private volatile boolean failed;
@@ -251,9 +260,20 @@ public final class GameDlssDevice implements AutoCloseable, DlssDevices.Device {
 		endPass().submit();
 	}
 
+	/**
+	 * Ends whatever the DLSS steps left open and records the frame's reconstruction state, without
+	 * handing the queue a submission of its own.
+	 * <p>
+	 * Every command the steps above recorded went into the frame's one command buffer, so the
+	 * frame's own submit carries them in order. Submitting here split one frame into two queue
+	 * submissions, and the second batch had nowhere to go but the next submission anyway: the
+	 * engine paid a signal, a pool rotation and a completion check for a boundary nothing needed.
+	 * The hold is still ended, because the depth blit that follows cannot be recorded inside a pass.
+	 */
+	@Override
 	public void submit(Runnable submitted) {
 		checkLive();
-		endPass().submit();
+		endPass();
 		submitted.run();
 	}
 
@@ -276,13 +296,10 @@ public final class GameDlssDevice implements AutoCloseable, DlssDevices.Device {
 			throw new IllegalArgumentException("DLSS conversion requires separate transfer-capable images");
 		}
 		try (MemoryStack stack = MemoryStack.stackPush()) {
-			VkFormatProperties properties = VkFormatProperties.calloc(stack);
-			VK12.vkGetPhysicalDeviceFormatProperties(device.vkDevice().getPhysicalDevice(), source.format(), properties);
-			if ((properties.optimalTilingFeatures() & VK12.VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0) {
+			if (!blitable(source.format(), true)) {
 				throw new IllegalArgumentException("DLSS source format does not support blit");
 			}
-			VK12.vkGetPhysicalDeviceFormatProperties(device.vkDevice().getPhysicalDevice(), destination.format(), properties);
-			if ((properties.optimalTilingFeatures() & VK12.VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0) {
+			if (!blitable(destination.format(), false)) {
 				throw new IllegalArgumentException("DLSS destination format does not support blit");
 			}
 			VkCommandBuffer commands = ((VulkanCommandEncoderAccessor) endPass()).vitrail$commandBuffer();
@@ -303,6 +320,29 @@ public final class GameDlssDevice implements AutoCloseable, DlssDevices.Device {
 			VK12.vkCmdPipelineBarrier(commands, VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
 					VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, barrier, null, null);
 		}
+	}
+
+	/**
+	 * Whether this format can be a blit source or a blit destination on the physical device.
+	 * <p>
+	 * The answer is a property of the device and cannot change while it lives, so it is asked once
+	 * per format and kept. A frame blits twice, and both of them used to ask again.
+	 */
+	private boolean blitable(int format, boolean asSource) {
+		Set<Integer> known = asSource ? blitSources : blitTargets;
+		if (known.contains(format)) {
+			return true;
+		}
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			VkFormatProperties properties = VkFormatProperties.calloc(stack);
+			VK12.vkGetPhysicalDeviceFormatProperties(device.vkDevice().getPhysicalDevice(), format, properties);
+			long required = asSource ? VK12.VK_FORMAT_FEATURE_BLIT_SRC_BIT : VK12.VK_FORMAT_FEATURE_BLIT_DST_BIT;
+			if ((properties.optimalTilingFeatures() & required) == 0L) {
+				return false;
+			}
+		}
+		known.add(format);
+		return true;
 	}
 
 	private void checkLive() {

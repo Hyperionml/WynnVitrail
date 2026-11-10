@@ -7,9 +7,11 @@ import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.ShaderType;
+import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.textures.AddressMode;
 import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import dev.vitrail.render.upscale.DlssTemporalState;
@@ -68,6 +70,15 @@ final class DlssTemporalInputs implements AutoCloseable {
 	private static final RenderPipeline[] pipelines = new RenderPipeline[2];
 	private float previousJitterX, previousJitterY;
 
+	/**
+	 * The uniform is the same 160 bytes every frame and the sampler never changes state, so both
+	 * outlive the frame. Making them per frame allocated and destroyed two Vulkan objects sixty
+	 * times a second, which is driver work on the render thread and a descriptor rewrite each pass.
+	 * The surface below is the thing that has to follow the size; these do not.
+	 */
+	private GpuBuffer frameUniform;
+	private GpuSampler nearestClamp;
+
 	void draw(GpuDevice device, GpuBuffer quad, GpuTextureView depth, TargetSurface color,
 			DlssTemporalState state, Matrix4fc clip, Vector3dc camera) {
 		int width = color.width(), height = color.height();
@@ -81,39 +92,46 @@ final class DlssTemporalInputs implements AutoCloseable {
 		Matrix4f toPrevious = new Matrix4f(state.reset() ? clip : state.previousClip());
 		if (!state.reset()) toPrevious.translate((float)(camera.x() - state.previousCamera().x()),
 				(float)(camera.y() - state.previousCamera().y()), (float)(camera.z() - state.previousCamera().z()));
-		try (var uniform = device.createBuffer(() -> BLOCK, GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, 160);
-			 var sampler = device.createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE,
-					 FilterMode.NEAREST, FilterMode.NEAREST, 1, OptionalDouble.empty())) {
-			try (var mapped = uniform.map(false, true)) {
-				Std140Builder.intoBuffer(mapped.data()).putMat4f(new Matrix4f(clip).invert()).putMat4f(toPrevious)
-						.putVec4(width, height, state.jitter().x(), state.jitter().y())
-						.putVec4(previousJitterX, previousJitterY, state.reset() ? 1 : 0, 0);
-			}
-			for (int index = 0; index < 2; index++) {
-				int which = index;
-				var fragment = Identifier.fromNamespaceAndPath(dev.vitrail.Vitrail.MOD_ID, "dlss/temporal_fragment_" + index);
-				GpuFormat format = index == 0 ? GpuFormat.RG16_FLOAT : GpuFormat.R8_UNORM;
-				if (pipelines[index] == null) pipelines[index] = RenderPipeline.builder()
-						.withLocation(Identifier.fromNamespaceAndPath(dev.vitrail.Vitrail.MOD_ID, "dlss/temporal_" + index))
-						.withVertexShader(VERTEX).withFragmentShader(fragment)
-						.withBindGroupLayout(GraphicsApi.blockAndSamplers(BLOCK, "Depth", "Current", "Previous"))
-						.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX)
-						.withColorTargetState(new ColorTargetState(Optional.empty(), format, ColorTargetState.WRITE_ALL))
-						.withPrimitiveTopology(PrimitiveTopology.TRIANGLES).withCull(false).build();
-				var source = GraphicsApi.source((id, type) -> type == ShaderType.FRAGMENT
-						? FSH.replace("MASK_OUTPUT", Integer.toString(which)) : VSH);
-				if (!GraphicsApi.valid(GraphicsApi.compile(device, pipelines[index], source)))
-					throw new IllegalStateException("DLSS temporal input shader did not compile");
-				try (var pass = device.createCommandEncoder().createRenderPass(() -> "DLSS temporal inputs",
-						(index == 0 ? motion : mask).view(), Optional.empty())) {
-					GraphicsApi.setPipeline(pass, pipelines[index]);
-					pass.setUniform(BLOCK, uniform);
-					pass.setVertexBuffer(0, quad.slice());
-					GraphicsApi.bindTexture(pass, "Depth", depth, sampler);
-					GraphicsApi.bindTexture(pass, "Current", color.storageView(), sampler);
-					GraphicsApi.bindTexture(pass, "Previous", previous.storageView(), sampler);
-					pass.draw(6, 1, 0, 0);
-				}
+		if (frameUniform == null) {
+			frameUniform = device.createBuffer(() -> BLOCK,
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, 160);
+		}
+		if (nearestClamp == null) {
+			nearestClamp = device.createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE,
+					FilterMode.NEAREST, FilterMode.NEAREST, 1, OptionalDouble.empty());
+		}
+		try (var mapped = frameUniform.map(false, true)) {
+			Std140Builder.intoBuffer(mapped.data()).putMat4f(new Matrix4f(clip).invert()).putMat4f(toPrevious)
+					.putVec4(width, height, state.jitter().x(), state.jitter().y())
+					.putVec4(previousJitterX, previousJitterY, state.reset() ? 1 : 0, 0);
+		}
+		// One encoder for both passes. Each used to open its own, which is a second command buffer
+		// and a second submission for the same two draws against the same uniform.
+		CommandEncoder encoder = device.createCommandEncoder();
+		for (int index = 0; index < 2; index++) {
+			int which = index;
+			var fragment = Identifier.fromNamespaceAndPath(dev.vitrail.Vitrail.MOD_ID, "dlss/temporal_fragment_" + index);
+			GpuFormat format = index == 0 ? GpuFormat.RG16_FLOAT : GpuFormat.R8_UNORM;
+			if (pipelines[index] == null) pipelines[index] = RenderPipeline.builder()
+					.withLocation(Identifier.fromNamespaceAndPath(dev.vitrail.Vitrail.MOD_ID, "dlss/temporal_" + index))
+					.withVertexShader(VERTEX).withFragmentShader(fragment)
+					.withBindGroupLayout(GraphicsApi.blockAndSamplers(BLOCK, "Depth", "Current", "Previous"))
+					.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX)
+					.withColorTargetState(new ColorTargetState(Optional.empty(), format, ColorTargetState.WRITE_ALL))
+					.withPrimitiveTopology(PrimitiveTopology.TRIANGLES).withCull(false).build();
+			var source = GraphicsApi.source((id, type) -> type == ShaderType.FRAGMENT
+					? FSH.replace("MASK_OUTPUT", Integer.toString(which)) : VSH);
+			if (!GraphicsApi.valid(GraphicsApi.compile(device, pipelines[index], source)))
+				throw new IllegalStateException("DLSS temporal input shader did not compile");
+			try (var pass = encoder.createRenderPass(() -> "DLSS temporal inputs",
+					(index == 0 ? motion : mask).view(), Optional.empty())) {
+				GraphicsApi.setPipeline(pass, pipelines[index]);
+				pass.setUniform(BLOCK, frameUniform);
+				pass.setVertexBuffer(0, quad.slice());
+				GraphicsApi.bindTexture(pass, "Depth", depth, nearestClamp);
+				GraphicsApi.bindTexture(pass, "Current", color.storageView(), nearestClamp);
+				GraphicsApi.bindTexture(pass, "Previous", previous.storageView(), nearestClamp);
+				pass.draw(6, 1, 0, 0);
 			}
 		}
 	}
@@ -127,7 +145,11 @@ final class DlssTemporalInputs implements AutoCloseable {
 		if (motion != null) motion.close();
 		if (mask != null) mask.close();
 		if (previous != null) previous.close();
+		if (frameUniform != null) frameUniform.close();
+		if (nearestClamp != null) nearestClamp.close();
 		motion = mask = previous = null;
+		frameUniform = null;
+		nearestClamp = null;
 		previousJitterX = previousJitterY = 0;
 	}
 }
