@@ -60,6 +60,20 @@ public abstract class GameRendererScaleMixin {
 	}
 
 	/**
+	 * The hand's own depth target, put at the main target's size before the hand pass is built.
+	 * <p>
+	 * Both halves of that pass have to carry the same size, and which size that is depends on the
+	 * road the frame took: the scale shrinks the main target for the level and puts it back at the
+	 * interface clear, while the DLSS bridge upscales inside the chain and puts it back before the
+	 * hand is drawn. This is the one point both roads pass through with the answer settled, which is
+	 * why the alignment is asked here rather than predicted from {@code beginWorld}.
+	 */
+	@Inject(method = "render3dHud", at = @At("HEAD"), require = 1)
+	private void vitrail$alignHandDepth(CallbackInfo ci) {
+		RenderScale.alignHandDepth(mainRenderTarget());
+	}
+
+	/**
 	 * Whether this frame advances the game, which 26.3 hands the extraction that runs before the
 	 * render rather than the render itself. The extraction is the first thing of the frame to see
 	 * it, so the intent is settled there, before the render reads it.
