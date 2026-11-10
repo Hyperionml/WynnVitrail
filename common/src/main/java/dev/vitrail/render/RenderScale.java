@@ -524,6 +524,7 @@ public final class RenderScale {
 		// One read of the volatile for the whole decision: the gate and the two sizes have to
 		// answer the same number, and three reads of a field another thread writes may not.
 		int asked = percent;
+		var dlssSize = worldComing ? PackChain.solasRenderSize(main.width, main.height) : null;
 
 		// Every road that answers no from here on stands down, and the reason is the same on each:
 		// the outline target follows the scale by hand, so a road that forgets it leaves the
@@ -531,14 +532,14 @@ public final class RenderScale {
 		// or the very failure that stopped scaling would freeze the outline scaled for good; and a
 		// world no pack draws stands down with them, the promise of the None road being that the
 		// game is left untouched.
-		if (asked >= WHOLE || !worldComing || !PackChain.drawingPack() || BILINEAR.refused) {
+		if ((asked >= WHOLE && dlssSize == null) || !worldComing || !PackChain.drawingPack() || BILINEAR.refused) {
 			standDown(main);
 
 			return false;
 		}
 
-		int width = Math.max(1, main.width * asked / WHOLE);
-		int height = Math.max(1, main.height * asked / WHOLE);
+		int width = dlssSize == null ? Math.max(1, main.width * asked / WHOLE) : dlssSize.width();
+		int height = dlssSize == null ? Math.max(1, main.height * asked / WHOLE) : dlssSize.height();
 		if (width >= main.width || height >= main.height) {
 			standDown(main);
 
@@ -701,6 +702,26 @@ public final class RenderScale {
 		fullDepth = null;
 		fullDepthView = null;
 		swapped = false;
+	}
+
+	static int outputWidth(RenderTarget main) {
+		return swapped ? fullWidth : main.width;
+	}
+
+	static int outputHeight(RenderTarget main) {
+		return swapped ? fullHeight : main.height;
+	}
+
+	/** Later vanilla draws and the HUD must see the display target, without a second FSR pass. */
+	static void promoteSolasOutput(RenderTarget main) {
+		if (swapped) {
+			if (main.getDepthTextureView() != null && fullDepthView != null) {
+				var backend = dev.vitrail.render.upscale.DlssDevices.installed();
+				if (backend == null) throw new IllegalStateException("Solas DLSS backend lost before presentation");
+				backend.blit(main.getDepthTextureView(), fullDepthView);
+			}
+			restore(main);
+		}
 	}
 
 	/** The view RCAS and the fallback write, read off the target after the restore. */

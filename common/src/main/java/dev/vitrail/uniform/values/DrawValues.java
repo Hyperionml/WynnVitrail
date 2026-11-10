@@ -80,6 +80,8 @@ public final class DrawValues {
 		builder.add("of_TextureMatrix", UniformShape.MAT4, (_, out) -> out.set(IDENTITY));
 
 		builder.add("viewWidth", UniformShape.FLOAT, (world, out) -> out.set(world.viewWidth()));
+		builder.add("wynnDlssClipJitter", UniformShape.VEC2,
+				(world, out) -> out.set(world.dlssClipJitterX(), world.dlssClipJitterY()));
 		builder.add("viewHeight", UniformShape.FLOAT, (world, out) -> out.set(world.viewHeight()));
 		builder.add("aspectRatio", UniformShape.FLOAT,
 				(world, out) -> out.set(world.viewWidth() / Math.max(1.0F, world.viewHeight())));

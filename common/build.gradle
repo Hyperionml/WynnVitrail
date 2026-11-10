@@ -63,7 +63,11 @@ sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 
 tasks.named("test", Test).configure {
 	useJUnitPlatform()
+	jvmArgs "--enable-native-access=ALL-UNNAMED"
 	classpath += sourceSets.main.runtimeClasspath
+	if (providers.gradleProperty("solasDlssPack").isPresent()) {
+		systemProperty "solasDlssPack", providers.gradleProperty("solasDlssPack").get()
+	}
 
 	// The game's own logging configuration comes in with its jar and writes logs/latest.log under
 	// the working directory, which is this module's folder by default: the tree came out dirty after
@@ -119,3 +123,24 @@ def writeBuildIdentity = tasks.register("writeBuildIdentity") {
 
 // The task rather than its directory, so that processResources waits for it without being told.
 sourceSets.main.resources.srcDir(writeBuildIdentity)
+
+// Developer diagnostics only; neither task enables an unfinished renderer option.
+tasks.register("solasDlssAudit", JavaExec) {
+	dependsOn tasks.named("classes")
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = "dev.vitrail.render.upscale.DlssDevelopmentTool"
+	doFirst {
+		args "audit", providers.gradleProperty("solasDlssPack").get()
+	}
+}
+
+tasks.register("dlssProbe", JavaExec) {
+	dependsOn tasks.named("classes")
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = "dev.vitrail.render.upscale.DlssDevelopmentTool"
+	jvmArgs "--enable-native-access=ALL-UNNAMED"
+	doFirst {
+		args "probe", providers.gradleProperty("dlssBridge").get(),
+				providers.gradleProperty("dlssRuntime").get()
+	}
+}

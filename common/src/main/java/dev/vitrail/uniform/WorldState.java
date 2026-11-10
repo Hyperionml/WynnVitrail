@@ -44,6 +44,9 @@ public interface WorldState extends ViewSource {
 
 	float viewHeight();
 
+	default float dlssClipJitterX() { return 0; }
+	default float dlssClipJitterY() { return 0; }
+
 	// camera positions, in the published convention
 
 	/** Shifted to stay inside a float, X and Z only. */

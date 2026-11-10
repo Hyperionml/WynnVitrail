@@ -13,6 +13,7 @@ import dev.vitrail.pack.model.ProgramStage;
 import dev.vitrail.render.BufferBlending;
 import dev.vitrail.render.GeometryStage;
 import dev.vitrail.render.WideSamplerSets;
+import dev.vitrail.render.upscale.GameDlssDevice;
 import dev.vitrail.Vitrail;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
@@ -198,6 +199,8 @@ public abstract class VulkanBackendMixin {
 		// its own that the game's log of enabled sets will not mistake for one of its own.
 		Set<VulkanFeature> features = new HashSet<>();
 		Set<String> extensions = new HashSet<>();
+		List<String> dlssExtensions = GameDlssDevice.deviceExtensions(physical);
+		extensions.addAll(dlssExtensions);
 		List<String> enabled = new ArrayList<>();
 		enable(physical, features, VERTEX_STORES, enabled, VOXELS);
 		enable(physical, features, FRAGMENT_STORES, enabled, VOXELS);
@@ -244,8 +247,10 @@ public abstract class VulkanBackendMixin {
 			Vitrail.logger().info("Vulkan device features: {}", String.join(", ", enabled));
 		}
 
-		return original.call(enabledSets.composite(new FeatureSet("Vitrail", extensions, features)),
+		VkDevice device = original.call(enabledSets.composite(new FeatureSet("Vitrail", extensions, features)),
 				physical);
+		GameDlssDevice.prepared(device, dlssExtensions);
+		return device;
 	}
 
 	@Unique

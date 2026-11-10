@@ -146,6 +146,10 @@ public final class FrameState implements WorldState {
 	private float glintAlpha = 1.0F;
 	private float viewWidth;
 	private float viewHeight;
+	private float dlssClipJitterX, dlssClipJitterY;
+	void dlssJitter(float x, float y) { dlssClipJitterX = x; dlssClipJitterY = y; }
+	@Override public float dlssClipJitterX() { return dlssClipJitterX; }
+	@Override public float dlssClipJitterY() { return dlssClipJitterY; }
 
 	// world
 	private long worldTime;
@@ -1313,6 +1317,10 @@ public final class FrameState implements WorldState {
 	}
 
 	// viewport
+	void viewport(float width, float height) {
+		this.viewWidth = width;
+		this.viewHeight = height;
+	}
 
 	@Override
 	public float viewWidth() {

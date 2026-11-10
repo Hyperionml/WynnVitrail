@@ -71,6 +71,9 @@ public final class ShaderPackSource implements AutoCloseable {
 	private final String packName;
 	private final Path shadersRoot;
 	private final FileSystem ownedFileSystem;
+	private boolean solasSpatialProbe;
+	private boolean solasTemporal;
+	private final Map<String, List<String>> dlssLines = new HashMap<>();
 
 	// Directory listings, lower-cased, kept for the case-insensitive fallback below. Built on
 	// demand because most packs never need it.
@@ -190,7 +193,7 @@ public final class ShaderPackSource implements AutoCloseable {
 	public static ShaderPackSource open(Path packPath) throws IOException {
 		OPENINGS.incrementAndGet();
 		if (Files.isDirectory(packPath)) {
-			return new ShaderPackSource(nameOf(packPath), findShadersRoot(packPath), null);
+			return prepareDlss(new ShaderPackSource(nameOf(packPath), findShadersRoot(packPath), null));
 		}
 
 		String fileName = packPath.getFileName() == null ? "" : packPath.getFileName().toString();
@@ -200,12 +203,26 @@ public final class ShaderPackSource implements AutoCloseable {
 
 		FileSystem zip = FileSystems.newFileSystem(packPath);
 		try {
-			return new ShaderPackSource(nameOf(packPath), findShadersRoot(zip.getPath("/")), zip);
+			return prepareDlss(new ShaderPackSource(nameOf(packPath), findShadersRoot(zip.getPath("/")), zip));
 		} catch (IOException | RuntimeException e) {
 			zip.close();
 			throw e;
 		}
 	}
+
+	private static ShaderPackSource prepareDlss(ShaderPackSource source) throws IOException {
+		if (dev.vitrail.render.upscale.SolasSpatialProbe.requested()) {
+			source.solasSpatialProbe = dev.vitrail.render.upscale.SolasDlssProfile.inspect(source).recognized();
+			source.solasTemporal = source.solasSpatialProbe && dev.vitrail.render.upscale.SolasSpatialProbe.mode() == 2;
+		}
+		return source;
+	}
+
+	public boolean solasSpatialProbe() {
+		return solasSpatialProbe;
+	}
+
+	public boolean solasTemporal() { return solasTemporal; }
 
 	/**
 	 * The pack is whatever contains a {@code shaders} directory. Usually that is the root, but
@@ -356,6 +373,13 @@ public final class ShaderPackSource implements AutoCloseable {
 	 * file too big to read is not kept, and every caller of it goes on getting the refusal.
 	 */
 	public List<String> readLines(Path file) throws IOException {
+		List<String> original = readOriginalLines(file);
+		return solasSpatialProbe ? dlssLines.computeIfAbsent(rel(file),
+				path -> dev.vitrail.render.upscale.SolasSpatialProbe.patch(path, original, solasTemporal)) : original;
+	}
+
+	/** Original bytes decoded for identity checks, unaffected by an explicitly enabled adapter. */
+	public List<String> readOriginalLines(Path file) throws IOException {
 		String relative = rel(file);
 		List<String> known = this.linesByFile.get(relative);
 		if (known != null) {

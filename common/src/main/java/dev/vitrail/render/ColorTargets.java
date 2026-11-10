@@ -256,6 +256,8 @@ final class ColorTargets {
 	private final boolean fogCleared;
 	private final Map<Integer, TargetSurface> mainSide = new LinkedHashMap<>();
 	private final Map<Integer, TargetSurface> altSide = new LinkedHashMap<>();
+	private final SolasPostTargets solasPost = new SolasPostTargets();
+	private boolean solasPostActive;
 	private final Set<Integer> fellBack = new TreeSet<>();
 	private final List<String> notes = new ArrayList<>();
 
@@ -814,8 +816,10 @@ final class ColorTargets {
 	 */
 	void copyBack(CommandEncoder encoder, List<Integer> targets) {
 		for (int index : targets) {
-			TargetSurface alt = this.altSide.get(index);
-			TargetSurface main = this.mainSide.get(index);
+			boolean post = solasPostActive && index >= 0 && index <= 2;
+			TargetSurface alt = post ? solasPost.get(index, TargetSchedule.Side.ALT) : this.altSide.get(index);
+			TargetSurface main = post ? solasPost.get(index, TargetSchedule.Side.MAIN) : this.mainSide.get(index);
+			if (post && alt == main) continue;
 			if (alt == null || main == null) {
 				note("nothing to copy back for " + TargetName.canonical(index) + ": the plan asks "
 						+ "for it and only one half of it exists");
@@ -1085,6 +1089,8 @@ final class ColorTargets {
 	}
 
 	void release() {
+		this.solasPost.close();
+		this.solasPostActive = false;
 		this.mainSide.values().forEach(ColorTargets::recycle);
 		this.altSide.values().forEach(ColorTargets::recycle);
 		this.mainSide.clear();
@@ -1443,6 +1449,7 @@ final class ColorTargets {
 	}
 
 	private TargetSurface target(int index, TargetSchedule.Side side) {
+		if (solasPostActive && index >= 0 && index <= 2) return solasPost.get(index, side);
 		// A target nothing flips has one texture, and a schedule asking for its other side is
 		// asking for the only one there is.
 		if (side == TargetSchedule.Side.ALT) {
@@ -1463,6 +1470,19 @@ final class ColorTargets {
 		}
 
 		return this.mainSide.get(index);
+	}
+
+	void solasSceneResolution() {
+		this.solasPostActive = false;
+	}
+
+	TargetSurface prepareSolasOutput(GpuDevice device, int width, int height) {
+		solasPost.ensure(device, width, height, formats, mipmapped, doubled);
+		return solasPost.get(0, TargetSchedule.Side.MAIN);
+	}
+
+	void solasDisplayResolution() {
+		this.solasPostActive = true;
 	}
 
 	private void note(String text) {

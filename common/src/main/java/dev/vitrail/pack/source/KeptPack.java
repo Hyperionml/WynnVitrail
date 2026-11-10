@@ -205,7 +205,7 @@ final class KeptPack {
 		}
 
 		if (!wanted.equals(standing.key())) {
-			return "the pack, its settings or the machine's defines have moved";
+			return "the pack, its settings, DLSS diagnostic mode or the machine's defines have moved";
 		}
 
 		if (!atTheAskedScale(standing)) {
@@ -313,7 +313,8 @@ final class KeptPack {
 	 * @param defines  the engine's whole table, which is what a world join moves and what every
 	 *                 flattened unit was branched on
 	 */
-	private record Key(Path packPath, String settings, String profile, Map<String, String> defines) {
+	private record Key(Path packPath, String settings, String profile, Map<String, String> defines,
+			int solasSpatialProbe) {
 
 		static Key of(Path packPath, Map<String, OptionValue> chosen, String profile) {
 			List<String> written = new ArrayList<>(chosen.size());
@@ -322,7 +323,8 @@ final class KeptPack {
 			Collections.sort(written);
 
 			return new Key(packPath, String.join("\n", written), profile,
-					Map.copyOf(EngineDefines.table(EngineDefines.machine())));
+					Map.copyOf(EngineDefines.table(EngineDefines.machine())),
+					dev.vitrail.render.upscale.SolasSpatialProbe.mode());
 		}
 	}
 }

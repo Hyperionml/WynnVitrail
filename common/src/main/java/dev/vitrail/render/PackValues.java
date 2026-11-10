@@ -660,6 +660,11 @@ public final class PackValues {
 		return this.state;
 	}
 
+	void viewport(float width, float height) {
+		this.state.viewport(width, height);
+	}
+	void dlssJitter(float x, float y) { this.state.dlssJitter(x, y); }
+
 	/**
 	 * The frame's matrices, for the engine's own passes rather than for a block. Package private and
 	 * not on {@link WorldState}, which is the pack's window onto the frame: what reads this reads

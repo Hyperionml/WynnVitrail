@@ -11,6 +11,30 @@ publishing a jar named after one thing and built from another.
 Everything is a pre-release while the version stays under `1.0.0`. Nothing here is a promise about
 what the next one holds.
 
+## Unreleased
+
+### Development
+
+- Added an experimental DLSS/DLAA selector with Chinese and English labels. The exact
+  Solas 3.9 profile uses Halton jitter, submitted-frame history, camera motion and a
+  current-color bias mask. View/world/size changes and interrupted frames reset history.
+  Unsupported packs and missing backends retain the normal renderer; evaluation failures
+  trigger a normal-pack reload. Per-object motion vectors are not implemented and
+  in-server visual parity remains unverified; this is not a production DLSS release.
+
+- Added an optional Windows x64 DLSS Super Resolution native backend, Java bindings,
+  an offscreen GPU smoke test, and source recognition for Solas 3.9. This is integration
+  groundwork: by default the game uses its existing upscaler.
+- Connected the optional backend to Minecraft 26.3 Vulkan device creation, command
+  recording and shutdown. Added an isolated Fabric hardware probe for actual game
+  textures, GPU readback, resizing, device recreation and unavailable-backend fallback.
+  The separately enabled Solas adapter uses this backend.
+- Added an explicitly enabled Solas 3.9 spatial diagnostic: reconstruct HDR before
+  bloom, retain display-sized lens-flare history, and restore full-sized color/depth
+  for later draws. GPU probes cover HDR conversion, mipmaps and history/depth retention.
+  This diagnostic override resets history every frame; the experimental selector uses
+  the temporal path described above instead.
+
 ## 0.13.0-beta
 
 ### Added

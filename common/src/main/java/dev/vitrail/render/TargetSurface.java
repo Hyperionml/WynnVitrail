@@ -30,6 +30,7 @@ final class TargetSurface implements AutoCloseable {
 			| GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT;
 
 	private final String label;
+	private final GpuDevice explicitDevice;
 	private final GpuFormat format;
 	private final boolean mipped;
 
@@ -76,6 +77,12 @@ final class TargetSurface implements AutoCloseable {
 	 */
 	TargetSurface(String label, GpuFormat format, boolean mipped, boolean storage, int width,
 			int height) {
+		this(null, label, format, mipped, storage, width, height);
+	}
+
+	TargetSurface(GpuDevice device, String label, GpuFormat format, boolean mipped, boolean storage,
+			int width, int height) {
+		this.explicitDevice = device;
 		this.label = label;
 		this.format = format;
 		this.mipped = mipped;
@@ -180,7 +187,7 @@ final class TargetSurface implements AutoCloseable {
 	}
 
 	private void allocate(int width, int height) {
-		GpuDevice device = RenderSystem.getDevice();
+		GpuDevice device = explicitDevice == null ? RenderSystem.getDevice() : explicitDevice;
 		int levels = levelsFor(this.mipped, width, height);
 
 		this.width = width;

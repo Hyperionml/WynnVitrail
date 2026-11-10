@@ -162,6 +162,7 @@ public final class ConfigEntry implements ConfigEntryPoint {
 							.addOption(shadowDistance(builder))
 							.addOption(shadowMapScale(builder))
 							.addOption(renderScale(builder))
+							.addOption(dlss(builder))
 							.addOption(temporalFold(builder))
 							.addOption(shadowAmortisation(builder))
 							.addOption(graphicsApi(builder))
@@ -327,7 +328,26 @@ public final class ConfigEntry implements ConfigEntryPoint {
 	 * a fold cannot read the image it writes. It is spent to make a cheaper scale look better rather
 	 * than to make the frame faster.
 	 */
+	private static OptionBuilder dlss(ConfigBuilder builder) {
+		dev.vitrail.render.upscale.DlssSettings.initialize(Vitrail.platform().gameDirectory());
+		return builder.createEnumOption(Identifier.fromNamespaceAndPath(Vitrail.MOD_ID, "dlss"),
+				dev.vitrail.render.upscale.DlssSettings.Mode.class)
+				.setName(Component.translatable("options.wynnvitrail.dlss"))
+				.setTooltip(_ -> Component.translatable("options.wynnvitrail.dlss.tooltip")
+						.append("\n").append(Component.translatable(dlssStatus())))
+				.setDefaultValue(dev.vitrail.render.upscale.DlssSettings.Mode.FSR1)
+				.setBinding(chosen -> {
+					try {
+						dev.vitrail.render.upscale.DlssSettings.save(chosen);
+						PackChoice.reload(Vitrail.platform().gameDirectory());
+					} catch (java.io.IOException e) { Vitrail.logger().error("Could not save DLSS preference", e); }
+				}, dev.vitrail.render.upscale.DlssSettings::mode)
+				.setElementNameProvider(chosen -> Component.translatable("options.wynnvitrail.dlss." + chosen.name().toLowerCase(java.util.Locale.ROOT)))
+				.setStorageHandler(() -> {}).setImpact(OptionImpact.HIGH);
+	}
+
 	private static OptionBuilder temporalFold(ConfigBuilder builder) {
+
 		return builder.createBooleanOption(TEMPORAL_FOLD)
 				.setName(Component.translatable(ScreenText.TEMPORAL_FOLD))
 				.setTooltip(_ -> Component.translatable(ScreenText.TEMPORAL_FOLD_TOOLTIP))
@@ -337,6 +357,13 @@ public final class ConfigEntry implements ConfigEntryPoint {
 						RENDER_SCALE)
 				.setStorageHandler(() -> {})
 				.setImpact(OptionImpact.MEDIUM);
+	}
+
+	private static String dlssStatus() {
+		if (!dev.vitrail.render.upscale.DlssSettings.failure().isEmpty()) return "options.wynnvitrail.dlss.failed";
+		var backend = dev.vitrail.render.upscale.DlssDevices.installed();
+		if (backend == null || !backend.operational()) return "options.wynnvitrail.dlss.unavailable";
+		return dev.vitrail.render.PackChain.dlssActive() ? "options.wynnvitrail.dlss.active" : "options.wynnvitrail.dlss.ready";
 	}
 
 	/**

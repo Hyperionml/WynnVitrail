@@ -73,3 +73,51 @@ tasks.named("jar", Jar).configure {
 		include "NOTICE"
 	}
 }
+
+// Opt-in hardware integration check. Uses the game's device and real mixins without opening
+// a window, connecting to a server, or touching a player's Minecraft installation.
+if (project.minecraft_version == "26.3") {
+	repositories {
+		maven { url = "https://maven.caffeinemc.net/releases" }
+	}
+	sourceSets {
+		dlssProbe {
+			compileClasspath += sourceSets.main.compileClasspath + project(":common").sourceSets.main.output
+			runtimeClasspath += compileClasspath + sourceSets.main.runtimeClasspath
+		}
+	}
+	dependencies {
+		dlssProbeRuntimeOnly("net.caffeinemc:sodium-fabric:${project.sodium_version}") { transitive = false }
+	}
+	tasks.register("dlssGameProbe", JavaExec) {
+		dependsOn tasks.named("jar"), tasks.named("dlssProbeClasses")
+		// ModDev's tools bring ASM 9.5 on a separate configuration; Knot requires exactly
+		// one ASM version. Its runtime uses the newer version supplied by Fabric/Mixin.
+		classpath = sourceSets.dlssProbe.runtimeClasspath.filter {
+			!(it.name.startsWith("asm") && it.name.endsWith("-9.5.jar"))
+		} + files(tasks.named("jar").flatMap { it.archiveFile })
+		mainClass = "dev.vitrail.dlssprobe.KnotProbe"
+		jvmArgs "--enable-native-access=ALL-UNNAMED"
+		workingDir = layout.buildDirectory.dir("dlss-probe-run")
+		doFirst {
+			workingDir.mkdirs()
+			sourceSets.dlssProbe.output.resourcesDir.mkdirs()
+			def mode = providers.gradleProperty("dlssProbeMode").getOrElse("enabled")
+			if (!(mode in ["enabled", "disabled", "missing", "solas", "temporal"])) {
+				throw new GradleException("dlssProbeMode must be enabled, disabled, missing, solas or temporal")
+			}
+			def needsBackend = mode in ["enabled", "solas", "temporal"]
+			systemProperty "fabric.development", "true"
+			systemProperty "fabric.addMods", tasks.named("jar").get().archiveFile.get().asFile.absolutePath
+			systemProperty "dlss.probe.classes", sourceSets.dlssProbe.output.classesDirs.singleFile.absolutePath
+			systemProperty "dlss.probe.mode", mode
+			systemProperty "dlss.probe.expectBackend", needsBackend
+			systemProperty "wynnvitrail.dlss.backend", mode != "disabled"
+			systemProperty "wynnvitrail.dlss.selfTest", mode == "enabled"
+			systemProperty "wynnvitrail.dlss.bridge", needsBackend
+					? providers.gradleProperty("dlssBridge").get() : new File(workingDir, "missing-bridge.dll").absolutePath
+			systemProperty "wynnvitrail.dlss.runtime", needsBackend
+					? providers.gradleProperty("dlssRuntime").get() : workingDir.absolutePath
+		}
+	}
+}

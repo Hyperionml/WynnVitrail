@@ -119,6 +119,7 @@ public final class PackChoice {
 	 * device, no pass, no target.
 	 */
 	public static void load(Path gameDirectory) {
+		dev.vitrail.render.upscale.DlssSettings.initialize(gameDirectory);
 		PassTimings.resetCensus();
 		// Here and not lower down: it decides what the translation emits, and every road
 		// below this point that reads a pack translates one.
@@ -538,6 +539,8 @@ public final class PackChoice {
 			throw e;
 		} catch (IOException | RuntimeException e) {
 			PackChain.stop();
+			if (dev.vitrail.render.upscale.DlssSettings.activeSource())
+				dev.vitrail.render.upscale.DlssSettings.fail(e.toString());
 			lastError = "Could not prepare this pack: " + e;
 			Vitrail.logger().error("Vitrail could not prepare a pack's chain", e);
 		}

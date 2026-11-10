@@ -413,6 +413,10 @@ public final class PackChain {
 	 * the clear living in the open that refusal skipped.
 	 */
 	private boolean redirected;
+	private final boolean solasSpatialProbe;
+	private final boolean solasTemporal;
+	private final SolasUpscaleBoundary solasBoundary = new SolasUpscaleBoundary();
+	private boolean solasDisplayActive;
 	private boolean reseedPhotonClouds;
 	private boolean maskAmbienceSwitch = dev.wynnvitrail.ambience.WynnAmbience.switching();
 
@@ -425,6 +429,17 @@ public final class PackChain {
 		// while announcing itself in the log sixty times a second. Measured 6 September 2026.
 		ShadowAmortisation.forget();
 		this.chain = chain;
+		this.solasSpatialProbe = opened.source().solasSpatialProbe();
+		this.solasTemporal = opened.source().solasTemporal();
+		if (this.solasSpatialProbe) {
+			if (dev.vitrail.render.upscale.DlssDevices.installed() == null) {
+				throw new IllegalStateException("Solas DLSS spatial probe requires an initialized DLSS backend; reload after device creation");
+			}
+			dev.vitrail.render.upscale.SolasSpatialProbe.validatePasses(
+					ordered(chain.chain()).stream().map(ChainPlan.Pass::program).toList());
+			Vitrail.logger().info(solasTemporal ? "Solas DLSS experimental temporal reconstruction enabled (camera motion with color-history rejection)"
+					: "Solas DLSS spatial diagnostic: history resets every frame");
+		}
 		this.values = values;
 		this.packPath = packPath;
 		this.reseedPhotonClouds = dev.wynnvitrail.ambience.WynnAmbience.active() != null
@@ -781,6 +796,10 @@ public final class PackChain {
 	 *         frame nothing
 	 */
 	public static boolean beforeLevel() {
+		if (dev.vitrail.render.upscale.DlssSettings.takeReload()) {
+			PackChoice.reload(Vitrail.platform().gameDirectory());
+			return drawingPack();
+		}
 		// Off Vulkan nothing is loaded for the world to move under, and the road is not named either:
 		// beside Iris that line would be about a pack Iris is the one drawing.
 		if (HostReport.otherBackend()) {
@@ -832,6 +851,7 @@ public final class PackChain {
 		} catch (GpuDeviceLossException e) {
 			throw e;
 		} catch (RuntimeException e) {
+			if (chain.solasTemporal) dev.vitrail.render.upscale.DlssSettings.fail(e.toString());
 			stop();
 			Vitrail.logger().error("Vitrail stopped drawing this pack after an error", e);
 			chain.release();
@@ -1188,10 +1208,18 @@ public final class PackChain {
 	 */
 	void beginFrame() {
 		if (!this.advanced) {
+			this.targets.solasSceneResolution();
+			this.solasDisplayActive = false;
 			this.advanced = true;
 			this.everAdvanced = true;
 			PassTimings.armCensus();
 			this.values.advance();
+			if (solasTemporal) {
+				var minecraft = Minecraft.getInstance();
+				var main = minecraft.gameRenderer.mainRenderTarget();
+				solasBoundary.begin(this.values, RenderScale.outputWidth(main), RenderScale.outputHeight(main),
+						minecraft.level, minecraft.options.getCameraType());
+			} else this.values.dlssJitter(0, 0);
 			PackDump.take(this.chain.place(), this.load,
 					this.programs == null ? List.of() : this.programs, this.values.world(),
 					this.terrain.programs(), this.families);
@@ -1271,6 +1299,8 @@ public final class PackChain {
 	 */
 	private void closeFrame() {
 		GeometryHold.flush(() -> "the frame before it closing");
+		this.targets.solasSceneResolution();
+		this.solasDisplayActive = false;
 		this.advanced = false;
 		this.opened = false;
 		this.begun = false;
@@ -1549,6 +1579,17 @@ public final class PackChain {
 			}
 
 			PackPass pass = this.programs.get(at);
+			if (solasSpatialProbe && !solasDisplayActive
+					&& pass.program().equals(dev.vitrail.render.upscale.SolasDlssProfile.BEFORE_PROGRAM)) {
+				this.targets.flushPending(encoder);
+				this.solasBoundary.reconstruct(device, this.targets,
+						this.targets.surface(0, pass.step().read(0)), depth,
+						RenderScale.outputWidth(ready.main()), RenderScale.outputHeight(ready.main()),
+						this.values.world().frameTime() * 1000, this.quad, this.values, solasTemporal);
+				RenderScale.promoteSolasOutput(ready.main());
+				this.solasDisplayActive = true;
+				this.currentChains.clear();
+			}
 
 			boolean emptying = this.targets.hasPendingClears();
 			// Where a pass of this index would be drawn, the seed above included: what a cut can still
@@ -1593,7 +1634,7 @@ public final class PackChain {
 
 			GpuBufferSlice uniforms = buffer.slice(pass.uniformOffset(), pass.uniformSize());
 			if (pass == this.last) {
-				pass.drawFinal(encoder, ready.mainView(), this.targets, depth, distant, this.quad,
+				pass.drawFinal(encoder, displayView(ready), this.targets, depth, distant, this.quad,
 						uniforms);
 			} else {
 				pass.draw(encoder, this.targets, depth, distant, this.quad, uniforms,
@@ -1694,6 +1735,29 @@ public final class PackChain {
 	/** What one frame of the chain is drawn against, settled once and read by both halves. */
 	private record Ready(RenderTarget main, GpuTextureView mainView, GpuTextureView depthView,
 			boolean seeding) {
+	}
+
+	private GpuTextureView displayView(Ready ready) {
+		return solasDisplayActive ? ready.main().getColorTextureView() : ready.mainView();
+	}
+
+	public static boolean dlssActive() {
+		return !disabled && active != null && active.solasTemporal
+				&& dev.vitrail.render.upscale.DlssSettings.activeSource();
+	}
+
+	static dev.vitrail.render.upscale.DlssBridge.OptimalSize solasRenderSize(int width, int height) {
+		PackChain chain = active;
+		var backend = dev.vitrail.render.upscale.DlssDevices.installed();
+		if (disabled || chain == null || !chain.solasSpatialProbe || backend == null || !backend.available()) return null;
+		try {
+			return backend.optimalSize(width, height, chain.solasTemporal ? dev.vitrail.render.upscale.DlssSettings.quality()
+					: dev.vitrail.render.upscale.DlssBridge.Quality.QUALITY);
+		} catch (RuntimeException e) {
+			dev.vitrail.render.upscale.DlssSettings.fail(e.toString());
+			Vitrail.logger().error("DLSS size query failed; restoring normal rendering", e);
+			return null;
+		}
 	}
 
 	/**
@@ -2556,9 +2620,9 @@ public final class PackChain {
 		// of them against gbufferProjection's inverse. Both are null on a frame that kept neither,
 		// which the pass reads as "no fog this frame" rather than as an error.
 		this.wynncraftOverlay.draw(device.createCommandEncoder(), device, this.quad,
-				ready.mainView(), this.targets.depth().scene(), this.targets.depth().opaque(),
+				displayView(ready), this.targets.depth().scene(), this.targets.depth().opaque(),
 				this.values.world());
-		AmbienceFrameHistory.present(device, ready.mainView(), this.maskAmbienceSwitch);
+		AmbienceFrameHistory.present(device, displayView(ready), this.maskAmbienceSwitch);
 		this.maskAmbienceSwitch = false;
 
 		// Outside any pass, and after the last one. Only the targets the pack keeps between frames
@@ -3180,12 +3244,20 @@ public final class PackChain {
 		this.values.passColour(null);
 		this.values.projection(null);
 
+		float sceneWidth = this.values.world().viewWidth();
+		float sceneHeight = this.values.world().viewHeight();
+		RenderTarget main = Minecraft.getInstance().gameRenderer.mainRenderTarget();
 		try (GpuBufferSlice.MappedView view = this.block.currentBuffer().map(false, true)) {
 			ByteBuffer data = view.data();
 			for (PackPass pass : this.programs) {
+				if (solasSpatialProbe && pass.program().equals(dev.vitrail.render.upscale.SolasDlssProfile.BEFORE_PROGRAM)) {
+					this.values.viewport(RenderScale.outputWidth(main), RenderScale.outputHeight(main));
+				}
 				data.position(pass.uniformOffset());
 				pass.write(Std140Builder.intoBuffer(data), this.values.world());
 			}
+		} finally {
+			this.values.viewport(sceneWidth, sceneHeight);
 		}
 	}
 
@@ -3430,6 +3502,7 @@ public final class PackChain {
 		// whether or not another load ever follows.
 		TerrainSampler.breaksAnisotropy(false);
 		this.compute.close();
+		this.solasBoundary.close();
 		this.targets.release();
 		if (this.features != null) {
 			this.features.release();
