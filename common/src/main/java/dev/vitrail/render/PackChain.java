@@ -413,6 +413,7 @@ public final class PackChain {
 	 * the clear living in the open that refusal skipped.
 	 */
 	private boolean redirected;
+	private final dev.vitrail.render.upscale.DlssPackProfile dlssProfile;
 	private final boolean solasSpatialProbe;
 	private final boolean solasTemporal;
 	private final SolasUpscaleBoundary solasBoundary = new SolasUpscaleBoundary();
@@ -429,14 +430,28 @@ public final class PackChain {
 		// while announcing itself in the log sixty times a second. Measured 6 September 2026.
 		ShadowAmortisation.forget();
 		this.chain = chain;
-		this.solasSpatialProbe = opened.source().solasSpatialProbe();
+		// A pack that says AFTER names the last program it wants drawn small; the engine runs before
+		// the next one instead, which is the same instant and the path everything else already takes.
+		var declared = opened.source().dlssProfile();
+		List<String> programs = ordered(chain.chain()).stream().map(ChainPlan.Pass::program).toList();
+		var resolved = declared;
+		if (declared != null && !declared.before()) {
+			int at = programs.indexOf(declared.triggerPass());
+			if (at < 0 || at + 1 >= programs.size()) {
+				throw new IllegalArgumentException("The declared DLSS trigger " + declared.triggerPass()
+						+ " has no program after it, so there is no point to run at: " + programs);
+			}
+			resolved = declared.resolvedTo(programs.get(at + 1));
+		}
+		this.dlssProfile = resolved;
+		this.solasSpatialProbe = resolved != null;
 		this.solasTemporal = opened.source().solasTemporal();
 		if (this.solasSpatialProbe) {
 			if (dev.vitrail.render.upscale.DlssDevices.installed() == null) {
 				throw new IllegalStateException("Solas DLSS spatial probe requires an initialized DLSS backend; reload after device creation");
 			}
-			dev.vitrail.render.upscale.SolasSpatialProbe.validatePasses(
-					ordered(chain.chain()).stream().map(ChainPlan.Pass::program).toList());
+			dev.vitrail.render.upscale.SolasSpatialProbe.validatePasses(programs, this.dlssProfile.triggerPass());
+			Vitrail.logger().info("DLSS pack contract: {}", this.dlssProfile.describe());
 			Vitrail.logger().info(solasTemporal ? "Solas DLSS experimental temporal reconstruction enabled (camera motion with color-history rejection)"
 					: "Solas DLSS spatial diagnostic: history resets every frame");
 		}
@@ -1580,12 +1595,13 @@ public final class PackChain {
 
 			PackPass pass = this.programs.get(at);
 			if (solasSpatialProbe && !solasDisplayActive
-					&& pass.program().equals(dev.vitrail.render.upscale.SolasDlssProfile.BEFORE_PROGRAM)) {
+					&& pass.program().equals(dlssProfile.triggerPass())) {
 				this.targets.flushPending(encoder);
 				this.solasBoundary.reconstruct(device, this.targets,
-						this.targets.surface(0, pass.step().read(0)), depth,
+						this.targets.surface(dlssProfile.colorTarget(), pass.step().read(0)), depth,
 						RenderScale.outputWidth(ready.main()), RenderScale.outputHeight(ready.main()),
-						this.values.world().frameTime() * 1000, this.quad, this.values, solasTemporal);
+						this.values.world().frameTime() * 1000, this.quad, this.values, solasTemporal,
+						dlssProfile.colorTarget(), pass.step().read(0));
 				RenderScale.promoteSolasOutput(ready.main());
 				this.solasDisplayActive = true;
 				this.currentChains.clear();
@@ -3250,7 +3266,7 @@ public final class PackChain {
 		try (GpuBufferSlice.MappedView view = this.block.currentBuffer().map(false, true)) {
 			ByteBuffer data = view.data();
 			for (PackPass pass : this.programs) {
-				if (solasSpatialProbe && pass.program().equals(dev.vitrail.render.upscale.SolasDlssProfile.BEFORE_PROGRAM)) {
+				if (solasSpatialProbe && pass.program().equals(dlssProfile.triggerPass())) {
 					this.values.viewport(RenderScale.outputWidth(main), RenderScale.outputHeight(main));
 				}
 				data.position(pass.uniformOffset());

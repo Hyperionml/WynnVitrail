@@ -7,7 +7,7 @@ import dev.vitrail.render.upscale.DlssBridge;
 import dev.vitrail.render.upscale.DlssDevices;
 import org.joml.Vector4f;
 
-/** HDR boundary before Solas composite13, with optional spatial-only diagnostics. */
+/** Runs the reconstruction at the point a pack declared, and writes into the buffer it named. */
 final class SolasUpscaleBoundary implements AutoCloseable {
 	private TargetSurface hdrInput;
 	private TargetSurface zeroMotion;
@@ -17,6 +17,17 @@ final class SolasUpscaleBoundary implements AutoCloseable {
 	private final dev.vitrail.render.upscale.DlssTemporalState temporal = new dev.vitrail.render.upscale.DlssTemporalState();
 	private final DlssTemporalInputs inputs = new DlssTemporalInputs();
 	private Object cameraEntity;
+
+	/**
+	 * Recording time, reported every three hundred frames.
+	 * <p>
+	 * The steps below are CPU work charged to the render thread: two mask passes, a format
+	 * conversion, the NGX evaluation and a history copy. Whether a frame is slow because the
+	 * device is slow or because this thread spent its time recording is a question no frame counter
+	 * answers, so this counts it and says so out loud.
+	 */
+	private long spentNanos;
+	private int spentFrames;
 
 	void begin(PackValues values, int width, int height, Object world, Object cameraMode) {
 		Object nextCamera = net.minecraft.client.Minecraft.getInstance().getCameraEntity();
@@ -29,11 +40,14 @@ final class SolasUpscaleBoundary implements AutoCloseable {
 	}
 
 	void reconstruct(GpuDevice device, ColorTargets targets, TargetSurface source, GpuTextureView depth,
-			int width, int height, float deltaMillis, com.mojang.blaze3d.buffers.GpuBuffer quad, PackValues values, boolean useTemporal) {
+			int width, int height, float deltaMillis, com.mojang.blaze3d.buffers.GpuBuffer quad,
+			PackValues values, boolean useTemporal, int outputTarget,
+			dev.vitrail.pack.target.TargetSchedule.Side outputSide) {
 		DlssDevices.Device current = DlssDevices.installed();
 		if (current == null || !current.available() || source == null || depth == null) {
 			throw new IllegalStateException("Solas DLSS probe requires a live backend, HDR color and scene depth");
 		}
+		long started = System.nanoTime();
 		if (hdrInput == null || hdrInput.width() != source.width() || hdrInput.height() != source.height()
 				|| outputWidth != width || outputHeight != height || backend != current) {
 			close();
@@ -51,7 +65,7 @@ final class SolasUpscaleBoundary implements AutoCloseable {
 				throw e;
 			}
 		}
-		TargetSurface output = targets.prepareSolasOutput(device, width, height);
+		TargetSurface output = targets.prepareSolasOutput(device, width, height, outputTarget, outputSide);
 		backend.blit(source.storageView(), hdrInput.storageView());
 		try {
 			boolean success;
@@ -79,6 +93,14 @@ final class SolasUpscaleBoundary implements AutoCloseable {
 		}
 		output.chainWritten(false);
 		targets.solasDisplayResolution();
+		spentNanos += System.nanoTime() - started;
+		if (++spentFrames >= 300) {
+			dev.vitrail.Vitrail.logger().info("DLSS reconstruct step: {} ms of recording a frame over the last {} frames, {}x{} into {}x{}",
+					String.format(java.util.Locale.ROOT, "%.2f", spentNanos / 1_000_000.0 / spentFrames),
+					spentFrames, source.width(), source.height(), width, height);
+			spentNanos = 0L;
+			spentFrames = 0;
+		}
 	}
 
 	@Override

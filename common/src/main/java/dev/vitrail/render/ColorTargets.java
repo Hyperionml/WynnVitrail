@@ -1476,9 +1476,10 @@ final class ColorTargets {
 		this.solasPostActive = false;
 	}
 
-	TargetSurface prepareSolasOutput(GpuDevice device, int width, int height) {
-		solasPost.ensure(device, width, height, formats, mipmapped, doubled);
-		return solasPost.get(0, TargetSchedule.Side.MAIN);
+	TargetSurface prepareSolasOutput(GpuDevice device, int width, int height, int index,
+			TargetSchedule.Side side) {
+		solasPost.ensure(device, width, height, formats, mipmapped, doubled, index);
+		return solasPost.get(index, side);
 	}
 
 	void solasDisplayResolution() {

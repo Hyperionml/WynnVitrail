@@ -31,7 +31,7 @@ public final class SolasBoundaryProbe {
 			for (int width : new int[] {960, 1280, 960}) {
 				int height = width * 9 / 16;
 				var size = backend.optimalSize(width, height, DlssBridge.Quality.QUALITY);
-				post.ensure(device, width, height, formats, mips, doubled);
+				post.ensure(device, width, height, formats, mips, doubled, 0);
 				try (var source = new TargetSurface(device, "Solas probe packed HDR", GpuFormat.RG11B10_FLOAT, false, false, size.width(), size.height());
 					 var input = new TargetSurface(device, "Solas probe DLSS input", GpuFormat.RGBA16_FLOAT, false, false, size.width(), size.height());
 					 var depth = new TargetSurface(device, "Solas probe forward depth", GpuFormat.R32_FLOAT, false, false, size.width(), size.height());
@@ -46,7 +46,7 @@ public final class SolasBoundaryProbe {
 					encoder.clearColorTexture(historyAlt.texture(), new Vector4f(0.75f, 0.25f, 0.5f, 1));
 					encoder.copyTextureToTexture(historyAlt.texture(), history.texture(), 0, 0, 0, 0, 0, width, height);
 					for (int frame = 0; frame < 2; frame++) {
-						if (post.ensure(device, width, height, formats, mips, doubled)
+						if (post.ensure(device, width, height, formats, mips, doubled, 0)
 								|| history != post.get(2, TargetSchedule.Side.MAIN)) {
 							throw new IllegalStateException("Post history was recreated between frames");
 						}

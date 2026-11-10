@@ -24,11 +24,10 @@ class SolasSpatialProbeTest {
 	@TempDir Path temporary;
 
 	@Test
-	void refusesIncompleteOrReorderedPostprocessing() {
-		assertDoesNotThrow(() -> SolasSpatialProbe.validatePasses(List.of("composite", "composite13", "composite14", "composite15", "final")));
-		assertThrows(IllegalArgumentException.class, () -> SolasSpatialProbe.validatePasses(List.of("composite14", "composite15", "final")));
-		assertThrows(IllegalArgumentException.class, () -> SolasSpatialProbe.validatePasses(List.of("composite13", "composite15", "composite14", "final")));
-		assertThrows(IllegalArgumentException.class, () -> SolasSpatialProbe.validatePasses(List.of("composite13", "composite14", "final")));
+	void refusesATriggerThePackDoesNotHave() {
+		List<String> plan = List.of("composite", "composite13", "composite14", "composite15", "final");
+		assertDoesNotThrow(() -> SolasSpatialProbe.validatePasses(plan, SolasDlssProfile.BEFORE_PROGRAM));
+		assertThrows(IllegalArgumentException.class, () -> SolasSpatialProbe.validatePasses(plan, "composite16"));
 	}
 
 	@Test
@@ -68,7 +67,7 @@ class SolasSpatialProbeTest {
 				var terrain = expander.expand(source.file(prefix + "gbuffers_terrain.vsh").orElseThrow());
 				assertFalse(live(terrain).contains("TAAJitter("));
 				var plan = TargetPlan.build(source, pack.options(), pack.settings(), pack.properties(), dimension);
-				SolasSpatialProbe.validatePasses(plan.running());
+				SolasSpatialProbe.validatePasses(plan.running(), SolasDlssProfile.BEFORE_PROGRAM);
 				assertTrue(plan.persistent().contains(2), "colortex2 must keep its lens-flare history");
 			}
 			var lens = expander.expand(source.file("composite14.fsh").orElseThrow());

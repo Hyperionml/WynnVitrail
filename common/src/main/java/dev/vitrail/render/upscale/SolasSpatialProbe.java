@@ -15,20 +15,19 @@ public final class SolasSpatialProbe {
 		return Boolean.getBoolean("wynnvitrail.dlss.solasSpatialProbe") ? 1 : DlssSettings.activeSource() ? 2 : 0;
 	}
 
-	public static void validatePasses(List<String> passes) {
-		int boundary = passes.indexOf(SolasDlssProfile.BEFORE_PROGRAM);
-		if (boundary < 0 || !passes.subList(boundary, passes.size())
-				.equals(List.of("composite13", "composite14", "composite15", "final"))) {
-			throw new IllegalArgumentException("Solas DLSS probe requires composite13, composite14, composite15 and final in order");
+	public static void validatePasses(List<String> passes, String trigger) {
+		if (passes.indexOf(trigger) < 0) {
+			throw new IllegalArgumentException("The declared DLSS trigger " + trigger
+					+ " is not one of this pack's programs, so there is no point to run at: " + passes);
 		}
 	}
 
 	/** Applied only after the complete original Solas manifest matched, before include expansion. */
 	public static List<String> patch(String relative, List<String> original) {
-		return patch(relative, original, false);
+		return patch(relative, original, false, true);
 	}
 
-	public static List<String> patch(String relative, List<String> original, boolean temporal) {
+	public static List<String> patch(String relative, List<String> original, boolean temporal, boolean disableTaa) {
 		if (temporal && relative.startsWith("programs/")
 				&& (relative.substring(9).startsWith("gbuffers_") || relative.substring(9).startsWith("dh_"))) {
 			String text = String.join("\n", original);
@@ -42,9 +41,10 @@ public final class SolasSpatialProbe {
 		}
 		if (!relative.equals("lib/common.glsl")) return original;
 		List<String> lines = new ArrayList<>(original);
-		// Keep composite15 and its colortex2.r writes. This diagnostic disables the old jitter
-		// with TAA; the subsequent temporal integration must supply jitter to all geometry.
-		lines.add("#undef TAA");
+		// The pack's own TAA and the reconstruction below both accumulate history, and two
+		// accumulators over the same frame is a smear rather than a sharper image. A pack says
+		// whether it wants its TAA left standing; Solas does not.
+		if (disableTaa) lines.add("#undef TAA");
 		return List.copyOf(lines);
 	}
 }

@@ -73,6 +73,7 @@ public final class ShaderPackSource implements AutoCloseable {
 	private final FileSystem ownedFileSystem;
 	private boolean solasSpatialProbe;
 	private boolean solasTemporal;
+	private dev.vitrail.render.upscale.DlssPackProfile dlssProfile;
 	private final Map<String, List<String>> dlssLines = new HashMap<>();
 
 	// Directory listings, lower-cased, kept for the case-insensitive fallback below. Built on
@@ -212,7 +213,16 @@ public final class ShaderPackSource implements AutoCloseable {
 
 	private static ShaderPackSource prepareDlss(ShaderPackSource source) throws IOException {
 		if (dev.vitrail.render.upscale.SolasSpatialProbe.requested()) {
-			source.solasSpatialProbe = dev.vitrail.render.upscale.SolasDlssProfile.inspect(source).recognized();
+			// The pack's own declaration first. A pack that says where its HDR image is and which
+			// program finishes it needs no recognition table, and the table below stays only as the
+			// built-in profile for the one pack that shipped before the declaration existed.
+			source.dlssProfile = dev.vitrail.render.upscale.DlssPackProfile.read(source.shadersRoot)
+					.orElse(null);
+			if (source.dlssProfile == null
+					&& dev.vitrail.render.upscale.SolasDlssProfile.inspect(source).recognized()) {
+				source.dlssProfile = dev.vitrail.render.upscale.DlssPackProfile.solas();
+			}
+			source.solasSpatialProbe = source.dlssProfile != null;
 			source.solasTemporal = source.solasSpatialProbe && dev.vitrail.render.upscale.SolasSpatialProbe.mode() == 2;
 		}
 		return source;
@@ -223,6 +233,8 @@ public final class ShaderPackSource implements AutoCloseable {
 	}
 
 	public boolean solasTemporal() { return solasTemporal; }
+
+	public dev.vitrail.render.upscale.DlssPackProfile dlssProfile() { return dlssProfile; }
 
 	/**
 	 * The pack is whatever contains a {@code shaders} directory. Usually that is the root, but
@@ -375,7 +387,8 @@ public final class ShaderPackSource implements AutoCloseable {
 	public List<String> readLines(Path file) throws IOException {
 		List<String> original = readOriginalLines(file);
 		return solasSpatialProbe ? dlssLines.computeIfAbsent(rel(file),
-				path -> dev.vitrail.render.upscale.SolasSpatialProbe.patch(path, original, solasTemporal)) : original;
+				path -> dev.vitrail.render.upscale.SolasSpatialProbe.patch(path, original, solasTemporal,
+						dlssProfile == null || dlssProfile.disableTaa())) : original;
 	}
 
 	/** Original bytes decoded for identity checks, unaffected by an explicitly enabled adapter. */
