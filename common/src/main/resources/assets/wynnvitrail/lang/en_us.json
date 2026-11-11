@@ -9,6 +9,7 @@
   "options.wynnvitrail.dlss.quality": "DLSS Quality",
   "options.wynnvitrail.dlss.balanced": "DLSS Balanced",
   "options.wynnvitrail.dlss.performance": "DLSS Performance",
+  "options.wynnvitrail.dlss.ultra_performance": "DLSS Ultra Performance",
   "options.wynnvitrail.dlss.dlaa": "DLAA (native resolution)",
   "options.vitrail.packs_title": "Shader Packs",
   "options.vitrail.page_title": "Settings",
