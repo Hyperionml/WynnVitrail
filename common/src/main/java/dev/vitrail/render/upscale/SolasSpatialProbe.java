@@ -24,10 +24,14 @@ public final class SolasSpatialProbe {
 
 	/** Applied only after the complete original Solas manifest matched, before include expansion. */
 	public static List<String> patch(String relative, List<String> original) {
-		return patch(relative, original, false, true);
+		return patch(relative, original, false, true, null, null);
 	}
 
-	public static List<String> patch(String relative, List<String> original, boolean temporal, boolean disableTaa) {
+	public static List<String> patch(String relative, List<String> original, boolean temporal,
+			boolean disableTaa, String jitterFile, String jitterFunction) {
+		if (jitterFile != null && jitterFunction != null && relative.equals(jitterFile)) {
+			return replaceJitter(original, jitterFunction);
+		}
 		if (temporal && relative.startsWith("programs/")
 				&& (relative.substring(9).startsWith("gbuffers_") || relative.substring(9).startsWith("dh_"))) {
 			String text = String.join("\n", original);
@@ -46,5 +50,30 @@ public final class SolasSpatialProbe {
 		// whether it wants its TAA left standing; Solas does not.
 		if (disableTaa) lines.add("#undef TAA");
 		return List.copyOf(lines);
+	}
+
+	/**
+	 * Replaces the pack's own sub-pixel offset with the one the reconstruction asked for.
+	 * <p>
+	 * A pack that already offsets its vertices has solved the hard half of this: every geometry
+	 * family that needs an offset already calls one function, so swapping what that function returns
+	 * is enough. Leaving the pack's own offsets in place while the model supplies another would hand
+	 * the reconstruction a vector that does not match the image it was given.
+	 */
+	private static List<String> replaceJitter(List<String> original, String function) {
+		String text = String.join("\n", original);
+		var pattern = java.util.regex.Pattern.compile("vec2\\s+" + java.util.regex.Pattern.quote(function)
+				+ "\\s*\\(\\s*vec2\\s+\\w+\\s*,\\s*float\\s+\\w+\\s*\\)\\s*\\{[^}]*\\}");
+		var matcher = pattern.matcher(text);
+		if (!matcher.find()) {
+			throw new IllegalStateException("The declared jitter function " + function
+					+ " is not of the shape this adapter replaces (vec2 name(vec2, float))");
+		}
+
+		String replacement = "vec2 " + function + "(vec2 coord, float w) {\n\treturn coord + wynnDlssClipJitter * w;\n}";
+		String patched = "uniform vec2 wynnDlssClipJitter;\n"
+				+ matcher.replaceFirst(java.util.regex.Matcher.quoteReplacement(replacement));
+
+		return patched.lines().toList();
 	}
 }

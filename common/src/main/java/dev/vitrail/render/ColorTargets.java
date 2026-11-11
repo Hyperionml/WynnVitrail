@@ -816,7 +816,7 @@ final class ColorTargets {
 	 */
 	void copyBack(CommandEncoder encoder, List<Integer> targets) {
 		for (int index : targets) {
-			boolean post = solasPostActive && index >= 0 && index <= 2;
+			boolean post = solasPostActive && solasPost.holds(index);
 			TargetSurface alt = post ? solasPost.get(index, TargetSchedule.Side.ALT) : this.altSide.get(index);
 			TargetSurface main = post ? solasPost.get(index, TargetSchedule.Side.MAIN) : this.mainSide.get(index);
 			if (post && alt == main) continue;
@@ -1449,7 +1449,7 @@ final class ColorTargets {
 	}
 
 	private TargetSurface target(int index, TargetSchedule.Side side) {
-		if (solasPostActive && index >= 0 && index <= 2) return solasPost.get(index, side);
+		if (solasPostActive && solasPost.holds(index)) return solasPost.get(index, side);
 		// A target nothing flips has one texture, and a schedule asking for its other side is
 		// asking for the only one there is.
 		if (side == TargetSchedule.Side.ALT) {

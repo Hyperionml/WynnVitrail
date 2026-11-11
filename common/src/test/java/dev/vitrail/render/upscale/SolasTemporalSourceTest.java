@@ -23,7 +23,7 @@ class SolasTemporalSourceTest {
 				String relative = source.rel(file);
 				Path target = shaders.resolve(relative);
 				Files.createDirectories(target.getParent());
-				Files.writeString(target, String.join("\n", SolasSpatialProbe.patch(relative, source.readOriginalLines(file), true, true)));
+				Files.writeString(target, String.join("\n", SolasSpatialProbe.patch(relative, source.readOriginalLines(file), true, true, null, null)));
 			}
 			Files.write(shaders.resolve("shaders.properties"), source.bytes(source.file("shaders.properties").orElseThrow()));
 		}

@@ -69,6 +69,11 @@ final class SolasPostTargets implements AutoCloseable {
 		return side == TargetSchedule.Side.ALT ? alt.getOrDefault(index, main.get(index)) : main.get(index);
 	}
 
+	/** Whether this set holds the pack's buffer at all, so a reader knows which set to ask. */
+	boolean holds(int index) {
+		return main.containsKey(index);
+	}
+
 	@Override
 	public void close() {
 		main.values().forEach(TargetSurface::close);

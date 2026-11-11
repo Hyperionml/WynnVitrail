@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * that worked before changes, and no other pack is touched.
  */
 public record DlssPackProfile(String name, String triggerPass, boolean before, int colorTarget,
-		boolean hdr, boolean cameraMotion, boolean disableTaa) {
+		boolean hdr, boolean cameraMotion, boolean disableTaa, String jitterFile, String jitterFunction) {
 
 	public static final String FILE = "vitrail-dlss.json";
 	public static final int SCHEMA_VERSION = 1;
@@ -40,7 +40,7 @@ public record DlssPackProfile(String name, String triggerPass, boolean before, i
 	 */
 	public static DlssPackProfile solas() {
 		return new DlssPackProfile("Solas 3.9", SolasDlssProfile.BEFORE_PROGRAM, true,
-				SolasDlssProfile.HDR_COLOR_TARGET, true, true, true);
+				SolasDlssProfile.HDR_COLOR_TARGET, true, true, true, null, null);
 	}
 
 	/** Reads the declaration beside the pack's {@code shaders} directory, if it carries one. */
@@ -150,9 +150,20 @@ public record DlssPackProfile(String name, String triggerPass, boolean before, i
 		boolean hdr = !root.has("hdr") || root.get("hdr").getAsBoolean();
 		boolean disableTaa = !root.has("disable_pack_taa") || root.get("disable_pack_taa").getAsBoolean();
 		String name = string(root, "name", origin);
+		String jitterFile = null;
+		String jitterFunction = null;
+		if (root.has("jitter") && root.get("jitter").isJsonObject()) {
+			JsonObject jitter = root.getAsJsonObject("jitter");
+			jitterFile = string(jitter, "file", "");
+			jitterFunction = string(jitter, "function", "");
+			if (jitterFile.isBlank() || jitterFunction.isBlank()) {
+				jitterFile = null;
+				jitterFunction = null;
+			}
+		}
 
 		return Optional.of(new DlssPackProfile(name, pass, type.equals("BEFORE"), color, hdr,
-				cameraMotion, disableTaa));
+				cameraMotion, disableTaa, jitterFile, jitterFunction));
 	}
 
 	private static String string(JsonObject object, String key, String fallback) {
@@ -170,7 +181,8 @@ public record DlssPackProfile(String name, String triggerPass, boolean before, i
 	 * growing a second, subtly different execution path.
 	 */
 	public DlssPackProfile resolvedTo(String pass) {
-		return new DlssPackProfile(name, pass, true, colorTarget, hdr, cameraMotion, disableTaa);
+		return new DlssPackProfile(name, pass, true, colorTarget, hdr, cameraMotion, disableTaa,
+				jitterFile, jitterFunction);
 	}
 
 	/** One line for the load log, so a picture can name the contract it was drawn under. */

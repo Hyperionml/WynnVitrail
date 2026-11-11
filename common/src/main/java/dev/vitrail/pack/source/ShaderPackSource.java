@@ -388,7 +388,9 @@ public final class ShaderPackSource implements AutoCloseable {
 		List<String> original = readOriginalLines(file);
 		return solasSpatialProbe ? dlssLines.computeIfAbsent(rel(file),
 				path -> dev.vitrail.render.upscale.SolasSpatialProbe.patch(path, original, solasTemporal,
-						dlssProfile == null || dlssProfile.disableTaa())) : original;
+						dlssProfile == null || dlssProfile.disableTaa(),
+						dlssProfile == null ? null : dlssProfile.jitterFile(),
+						dlssProfile == null ? null : dlssProfile.jitterFunction())) : original;
 	}
 
 	/** Original bytes decoded for identity checks, unaffected by an explicitly enabled adapter. */
