@@ -73,3 +73,31 @@ tasks.named("jar", Jar).configure {
 		include "NOTICE"
 	}
 }
+
+// Applies production Sodium mixins without starting a client or opening a world.
+if (project.minecraft_version == "26.3") {
+    repositories { maven { url = "https://maven.caffeinemc.net/releases" } }
+    sourceSets {
+        sodiumProbe {
+            compileClasspath += sourceSets.main.compileClasspath
+            runtimeClasspath += compileClasspath + sourceSets.main.runtimeClasspath
+        }
+    }
+    dependencies {
+        sodiumProbeRuntimeOnly("net.caffeinemc:sodium-fabric:${project.sodium_version}") { transitive = false }
+    }
+    tasks.register("sodiumMixinProbe", JavaExec) {
+        dependsOn tasks.named("jar"), tasks.named("sodiumProbeClasses")
+        classpath = sourceSets.sodiumProbe.runtimeClasspath.filter {
+            !(it.name.startsWith("asm") && it.name.endsWith("-9.5.jar"))
+        } + files(tasks.named("jar").flatMap { it.archiveFile })
+        mainClass = "dev.vitrail.sodiumprobe.KnotProbe"
+        workingDir = layout.buildDirectory.dir("sodium-probe-run")
+        doFirst {
+            workingDir.mkdirs()
+            sourceSets.sodiumProbe.output.resourcesDir.mkdirs()
+            systemProperty "fabric.development", "true"
+            systemProperty "fabric.addMods", tasks.named("jar").get().archiveFile.get().asFile.absolutePath
+        }
+    }
+}

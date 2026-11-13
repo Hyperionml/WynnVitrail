@@ -11,6 +11,12 @@ publishing a jar named after one thing and built from another.
 Everything is a pre-release while the version stays under `1.0.0`. Nothing here is a promise about
 what the next one holds.
 
+## 0.13.0-beta-wynn10
+
+- Fixed Minecraft 26.3 compatibility with Sodium 0.9.3-beta.5: capture the terrain
+  sampler at the render entry and support the additional shader compilation parameter.
+- Added a Fabric Knot probe for production Sodium mixin injection.
+
 ## 0.13.0-beta
 
 ### Added

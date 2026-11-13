@@ -10,6 +10,7 @@ import dev.vitrail.sodium.SodiumPasses;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.buffers.GpuBuffer;
@@ -85,6 +86,14 @@ public abstract class MixinDefaultChunkRenderer {
 	/** The pass opened for one terrain pass, or null where the renderer kept the one handed in. */
 	@Unique
 	private @Nullable RenderPass vitrail$opened;
+
+	// Sodium 0.9.3 no longer passes the atlas sampler to ShaderChunkRenderer.begin.
+	// Capture it on render, before begin compiles the terrain pipeline, on both versions.
+	@Inject(method = "render", at = @At("HEAD"), require = 1)
+	private void vitrail$sampler(CallbackInfo callback,
+			@Local(argsOnly = true) GpuSampler terrainSampler) {
+		TerrainDraw.sampler(terrainSampler);
+	}
 
 	// require, because a silently unapplied probe prints the same zeros as an empty rotate, and
 	// the whole point of the clock is telling those two apart.

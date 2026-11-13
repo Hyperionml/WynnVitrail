@@ -2,24 +2,23 @@ package dev.vitrail.mixin.sodium;
 
 import dev.vitrail.sodium.SodiumPasses;
 import dev.vitrail.pack.program.TerrainPass;
-import dev.vitrail.render.LegacyTerrainFilter;
+
 import dev.vitrail.render.TerrainDraw;
-import dev.vitrail.render.TerrainSampler;
+
 
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
-import com.mojang.renderpearl.api.textures.GpuSampler;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.renderpearl.api.vertex.VertexFormat;
 import net.caffeinemc.mods.sodium.client.gpu.device.backend.DrawBackend;
 import net.caffeinemc.mods.sodium.client.render.chunk.ShaderChunkRenderer;
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
-import net.caffeinemc.mods.sodium.client.util.FogParameters;
 import net.minecraft.client.renderer.oit.OitStage;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import org.jspecify.annotations.Nullable;
@@ -66,35 +65,11 @@ public abstract class MixinShaderChunkRenderer {
 	@Shadow
 	protected VertexFormat vertexFormat;
 
-	/**
-	 * Settles which sampler a pack's terrain reads the block atlas through, at the one point that is
-	 * handed the game's: {@code begin} has it and {@code compileProgram} does not. {@code begin}
-	 * calls {@code compileProgram}, so this always lands first.
-	 * <p>
-	 * <strong>What the pack binds is ours and not the game's, and that is a correction rather than a
-	 * preference.</strong> The game filters the atlas LINEAR and Iris binds NEAREST for every terrain
-	 * draw, so a pack, which is written against Iris, expects NEAREST. What that filter decides on
-	 * cutout foliage is the silhouette rather than the colour, the fragment being discarded on the
-	 * atlas's alpha, and {@link TerrainSampler} carries the whole of it with the references on both
-	 * sides. {@link LegacyTerrainFilter} hands back whatever this road was given, for a comparison,
-	 * which is the game's LINEAR under the camera and NEAREST in the shadow map: what the switch
-	 * moves is the gbuffer half alone. The choice is made where the pack is known to be drawing, so
-	 * that a pass with no pack behind it neither asks nor announces anything.
-	 * <p>
-	 * Every pass comes through here, the shadow map's included: the light's draw hands a sampler of
-	 * its own down the same road, NEAREST rather than the game's
-	 * ({@code sodium/ShadowTerrain.java:323}), and the pack's shadow programs bind what is settled
-	 * here.
-	 */
-	@Inject(method = "begin", at = @At("HEAD"))
-	private void vitrail$sampler(TerrainRenderPass pass, FogParameters parameters,
-			GpuSampler terrainSampler, @Nullable OitStage stage, CallbackInfo callback) {
-		TerrainDraw.sampler(terrainSampler);
-	}
-
+/* Capture only the stable arguments: Sodium 0.9.3 adds compilation parameters. */
 	@Inject(method = "compileProgram", at = @At("HEAD"), cancellable = true)
-	private void vitrail$terrain(TerrainRenderPass pass, @Nullable OitStage stage,
-			CallbackInfoReturnable<RenderPipeline> callback) {
+	private void vitrail$terrain(CallbackInfoReturnable<RenderPipeline> callback,
+			@Local(argsOnly = true) TerrainRenderPass pass,
+			@Local(argsOnly = true) @Nullable OitStage stage) {
 		// The region offset arrives through push constants, which only the Vulkan backend pushes at
 		// all: under OpenGL Sodium sets it as an ordinary uniform and our shader would read nothing.
 		// An order independent stage asks for one of Sodium's own sets, which no pack answers for.
