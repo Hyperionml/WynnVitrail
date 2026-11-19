@@ -101,8 +101,8 @@ public record VoxyPatch(String pack, String dimension, List<Integer> opaque, Lis
                     json.has("excludeLodsFromVanillaDepth") && json.get("excludeLodsFromVanillaDepth").getAsBoolean(),
                     json.getAsJsonArray("uniforms").asList().stream().map(JsonElement::getAsString).toList(),
                     Collections.unmodifiableMap(samplers), Map.copyOf(opened.settings().unitDefines()),
-                    opaqueSource,
-                    patch(source,expander,prefix,"voxy_translucent.glsl",json,"translucentPatchData"),
+                    fragmentScope(opaqueSource, json),
+                    fragmentScope(patch(source,expander,prefix,"voxy_translucent.glsl",json,"translucentPatchData"), json),
                     patch(source,expander,prefix,"voxy_taa.glsl",json,"taaOffset"), ViewOptions.read(json, unit.defines()));
         } catch (RuntimeException e) {
             throw new IOException(source.packName() + " [" + place + "] voxy.json: " + e.getMessage(), e);
@@ -110,6 +110,17 @@ public record VoxyPatch(String pack, String dimension, List<Integer> opaque, Lis
     }
     public Optional<dev.vitrail.pack.model.BlendMode> translucentBlend(int outputSlot) {
         return Optional.ofNullable(blending.getOrDefault(outputSlot, blending.get(-1)));
+    }
+
+    /** The v1 provider adds a near-projection uniform for its vertex stage to both stages' UBO.
+     * A pack that never requested that uniform owns the name in its fragment source (BSL uses
+     * it for its LOD projection). Scope that declaration and all its uses to the patch. */
+    private static String fragmentScope(String source, JsonObject config) {
+        if (!source.contains("gbufferProjection") || config.getAsJsonArray("uniforms").asList().stream()
+                .anyMatch(value -> value.getAsString().equals("gbufferProjection"))) return source;
+        if (!java.util.regex.Pattern.compile("(?m)^\\s*mat4\\s+gbufferProjection\\s*[=;]").matcher(source).find())
+            return source;
+        return "#define gbufferProjection wynnvitrailPatchProjection\n" + source + "\n#undef gbufferProjection\n";
     }
 
     private static String defaultSampler(String name) {
