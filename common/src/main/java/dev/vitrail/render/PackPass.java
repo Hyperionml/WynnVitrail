@@ -857,6 +857,10 @@ final class PackPass {
 	 * terrain exactly as the pass it hangs off does.
 	 */
 	static GpuTextureView distant(String sampler, ColorTargets targets, GpuTextureView distantView) {
+		if (sampler.startsWith("vxDepthTex")) {
+			var depth = dev.vitrail.voxy.VoxyBridge.depth(sampler);
+			return depth == null ? targets.white() : depth;
+		}
 		return SamplerPlan.distantWithoutWater(sampler)
 				? or(targets.depth().distantOpaque(), targets.white())
 				: or(distantView, targets.white());

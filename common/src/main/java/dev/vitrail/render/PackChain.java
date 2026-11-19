@@ -13,6 +13,8 @@ import dev.vitrail.pack.target.SamplerPlan;
 import dev.vitrail.pack.target.TargetDirectives;
 import dev.vitrail.pack.target.TargetPlan;
 import dev.vitrail.pack.target.TargetSchedule;
+import dev.vitrail.voxy.VoxyBridge;
+import dev.vitrail.voxy.VoxyPatch;
 import dev.vitrail.pack.texture.CustomImages;
 import dev.vitrail.render.storage.StorageImages;
 import dev.vitrail.render.timing.PassTimings;
@@ -344,6 +346,11 @@ public final class PackChain {
 	 * pack serves no translucent pass to compose in front of. */
 	private final FeatureLayer features;
 	private final int load;
+	VoxyPatch voxyPatch;
+	private VoxyBridge.Frame voxyFrame;
+	private long voxySerial;
+	private int voxyStages;
+	private Object voxyLevel;
 	final TerrainDraw terrain;
 	private final SkyDraw sky;
 	private final EntityDraw entities;
@@ -787,6 +794,7 @@ public final class PackChain {
 			return false;
 		}
 
+		if (VoxyBridge.pollReload()) PackChoice.reload(Vitrail.platform().gameDirectory());
 		sayBeforeLevelRoad();
 
 		return RELOAD_BEFORE_LEVEL
@@ -1191,7 +1199,7 @@ public final class PackChain {
 			this.advanced = true;
 			this.everAdvanced = true;
 			PassTimings.armCensus();
-			this.values.advance();
+			this.values.advance(this::beginVoxyFrame);
 			PackDump.take(this.chain.place(), this.load,
 					this.programs == null ? List.of() : this.programs, this.values.world(),
 					this.terrain.programs(), this.families);
@@ -3409,11 +3417,77 @@ public final class PackChain {
 		}
 	}
 
+	private void beginVoxyFrame() {
+		voxyStages = 0;
+		if (voxyPatch == null || !VoxyBridge.requested()) return;
+		var mc = Minecraft.getInstance();
+		var target = mc.gameRenderer.mainRenderTarget();
+		if (voxyFrame == null || voxyLevel != mc.level || target.width != voxyFrame.width()
+				|| target.height != voxyFrame.height() || mc.getWindow().getWidth() != voxyFrame.displayWidth()
+				|| mc.getWindow().getHeight() != voxyFrame.displayHeight()) VoxyBridge.invalidate();
+		voxyLevel = mc.level;
+		voxyFrame = new VoxyBridge.Frame(load, ++voxySerial, target.width, target.height,
+				mc.getWindow().getWidth(), mc.getWindow().getHeight(), values.world(), values.catalog(), voxyPatch);
+		VoxyBridge.begin(voxyFrame);
+	}
+
+	public static void voxyDraw(VoxyBridge.Stage stage) {
+		PackChain c = active;
+		if (!drawingPack() || c.voxyPatch == null || !VoxyBridge.requested() || TerrainDraw.drawingShadow()) return;
+		c.beginFrame();
+		int bit = 1 << stage.ordinal();
+		if (c.voxyFrame == null || (c.voxyStages & bit) != 0) return;
+		var device = RenderSystem.getDevice();
+		if (!c.openTargets(device)) return;
+		var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+		var near = target.getDepthTextureView();
+		if (near == null) return;
+		boolean transparent = stage == VoxyBridge.Stage.TRANSLUCENT;
+		var slots = transparent ? c.voxyPatch.translucent() : c.voxyPatch.opaque();
+		var colors = new java.util.ArrayList<GpuTextureView>();
+		for (int index : slots) {
+			var view = c.targets.view(index, c.voxySide(index));
+			if (view == null) throw new IllegalStateException("Unavailable Voxy colortex" + index);
+			colors.add(view);
+		}
+		var encoder = device.createCommandEncoder();
+		c.targets.flushPending(encoder);
+		if (transparent && (c.voxyStages & (1 << VoxyBridge.Stage.OPAQUE.ordinal())) == 0) return;
+		if (!transparent && !c.targets.depth().takeScene(encoder, device, c.quad(device), near,
+				target.width, target.height)) return;
+		c.voxyStages |= bit;
+		VoxyBridge.draw(new VoxyBridge.Draw(c.voxyFrame,stage,device,List.copyOf(colors),near,c.targets.coverage(),
+				c::voxySampler));
+	}
+
+	private TargetSchedule.Side voxySide(int index) {
+		return targets.schedule().step("gbuffers_terrain").map(step -> step.read(index)).orElse(TargetSchedule.Side.MAIN);
+	}
+
+	private GpuTextureView voxySampler(String name) {
+		var color = dev.vitrail.pack.model.TargetName.index(name);
+		if (color.isPresent()) return targets.view(color.getAsInt(), voxySide(color.getAsInt()));
+		var view = switch (name) {
+			case "depthtex0", "depthtex1" -> targets.depth().scene();
+			case "noisetex" -> targets.noise();
+			case "shadowtex0" -> targets.shadow().depth();
+			case "shadowtex1" -> targets.shadow().depthWithoutTranslucents();
+			case "shadowcolor0" -> targets.shadow().colour(0);
+
+			case "vxDepthTexTrans", "vxDepthTexOpaque" -> VoxyBridge.depth(name);
+			case "dhDepthTex0" -> targets.depth().distantScene();
+			case "dhDepthTex1" -> targets.depth().distantOpaque();
+			default -> throw new IllegalArgumentException("Unknown Voxy sampler " + name);
+		};
+		return view == null ? targets.white() : view;
+	}
+
 	private String place() {
 		return this.chain.place().isEmpty() ? "the root" : this.chain.place();
 	}
 
 	void release() {
+		if (voxyFrame != null) { VoxyBridge.invalidate(); voxyFrame = null; }
 		// The worker's flag first, so a compile still running for this chain stores nothing more
 		// into programs nothing will ever draw again; what it already stored is destroyed with the
 		// walk below, which is safe for objects nothing ever bound. Only families the worker

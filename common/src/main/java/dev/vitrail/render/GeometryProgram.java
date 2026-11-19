@@ -2072,7 +2072,7 @@ final class GeometryProgram {
 			// which is the one thing a texture.STAGE.NAME override needs to know. Mellow moves
 			// noisetex there and nowhere else, so this is not a case the chain also covers.
 			case PACK_TEXTURE -> packTexture(one);
-			case DISTANT_DEPTH -> distantDepth();
+			case DISTANT_DEPTH -> sampler.startsWith("vxDepthTex") ? PackPass.distant(sampler, this.targets, null) : distantDepth();
 			// Null where the target cannot be stored into: prepare refuses the program then,
 			// the layout typing this name as a storage image that no placeholder can stand for.
 			case COLOUR_IMAGE -> colourImage(binding);

@@ -81,7 +81,7 @@ public final class SamplerPlan {
 	 * moments, and {@code render/ViewMatrices} the volume the matrices under these names unproject.
 	 */
 	private static final Set<String> DISTANT_DEPTH =
-			Set.of("dhDepthTex", "dhDepthTex0", "dhDepthTex1");
+			Set.of("dhDepthTex", "dhDepthTex0", "dhDepthTex1", "vxDepthTexOpaque", "vxDepthTexTrans");
 	private static final String SHADOW_COLOUR_PREFIX = "shadowcolor";
 	private static final String NOISE = "noisetex";
 	private static final String WATER_SHADOW = "watershadow";

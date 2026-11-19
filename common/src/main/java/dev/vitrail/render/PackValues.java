@@ -676,7 +676,12 @@ public final class PackValues {
 	 * smoothed value in the pack fade at twice the speed with nothing on screen to say so.
 	 */
 	public void advance() {
+		advance(() -> {});
+	}
+
+	void advance(Runnable publishCamera) {
 		this.state.advance();
+		publishCamera.run();
 		this.customs.update(this.state, this.state.frameTime());
 
 		// Normally empty, and this is the only place able to say anything: an expression that

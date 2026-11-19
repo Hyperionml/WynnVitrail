@@ -308,6 +308,7 @@ public final class EngineDefines {
 					Integer.toString(ordinal));
 		}
 
+		if (dev.vitrail.voxy.VoxyBridge.macro()) defines.put("VOXY", "3");
 		return defines;
 	}
 

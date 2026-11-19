@@ -214,7 +214,18 @@ public final class IncludeExpander {
 		return List.copyOf(this.loose);
 	}
 
+	/** Expand an inline stage relative to its owning configuration file. */
+	public String expandInline(Path owner, String text) throws IOException {
+		State state = new State(startingDefines(this.source.rel(owner)), this.loose);
+		expandFile(owner, 0, state, logicalLines(text.lines().toList()));
+		return String.join("\n", state.output);
+	}
+
 	private void expandFile(Path file, int depth, State state) throws IOException {
+		expandFile(file, depth, state, null);
+	}
+
+	private void expandFile(Path file, int depth, State state, List<Logical> inline) throws IOException {
 		String relative = this.source.rel(file);
 		state.maxDepth = Math.max(state.maxDepth, depth);
 
@@ -244,7 +255,7 @@ public final class IncludeExpander {
 
 		ConditionStack conditions = new ConditionStack();
 
-		for (Logical logical : logicalLines(file)) {
+		for (Logical logical : inline == null ? logicalLines(file) : inline) {
 			// Checked here and not only on the way in. One file is enough on its own: a pack that
 			// ships a single shader of a million lines never expands anything, so a budget read
 			// once per file would never be read at all.

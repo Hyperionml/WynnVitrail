@@ -119,6 +119,7 @@ public final class PackChoice {
 	 * device, no pass, no target.
 	 */
 	public static void load(Path gameDirectory) {
+		dev.vitrail.voxy.VoxyBridge.macro(false);
 		PassTimings.resetCensus();
 		// Here and not lower down: it decides what the translation emits, and every road
 		// below this point that reads a pack translates one.
@@ -416,6 +417,18 @@ public final class PackChoice {
 			// uniform outside a block. Complementary's deferred1 died that way on a DH toggle.
 			// Iris has one table for both jobs, StandardMacros.java:64-65.
 			PackDefines.install();
+			dev.vitrail.voxy.VoxyPatch voxyPatch = null;
+			if (dev.vitrail.voxy.VoxyBridge.requested()) {
+				dev.vitrail.voxy.VoxyBridge.macro(true);
+				try (OpenedPack probe = OpenedPack.open(pack, chosen, settings.profile())) {
+					String directory = PackPlace.place(probe.source());
+
+					voxyPatch = dev.vitrail.voxy.VoxyPatch.read(probe, directory);
+				} catch (IOException | RuntimeException error) {
+					Vitrail.logger().warn("Voxy extension disabled for {}", pack, error);
+				}
+				dev.vitrail.voxy.VoxyBridge.macro(voxyPatch != null);
+			}
 			report(pack);
 
 			// The kept variant, and this reading is the only one in the engine entitled to it: it runs
@@ -463,6 +476,7 @@ public final class PackChoice {
 				// zip at once is a race, and Sodium takes the mesh format here before any pass asks
 				// for a shader. The other families then translate on a worker, so Complementary
 				// Unbound's entities overlap the composite compiles and never sit on the render thread.
+				live.voxyPatch = voxyPatch;
 				PackChain.activate(live);
 				live.terrain.read(opened);
 				// After the two reads this thread makes and before the worker starts on the rest,

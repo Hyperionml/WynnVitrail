@@ -31,6 +31,15 @@ public final class DhValues {
 	}
 
 	public static void register(UniformCatalog.Builder builder) {
+		builder.add("vxRenderDistance", UniformShape.INT, (w,o) -> o.set(dev.vitrail.voxy.VoxyBridge.distance()));
+		builder.add("vxNearPlane", UniformShape.FLOAT, (w,o) -> o.set(dev.vitrail.voxy.VoxyBridge.near()));
+		builder.add("vxFarPlane", UniformShape.FLOAT, (w,o) -> o.set(dev.vitrail.voxy.VoxyBridge.far()));
+		for (String base : java.util.List.of("vxProj", "vxModelView", "vxViewProj")) {
+			for (String suffix : java.util.List.of("", "Inv", "Prev")) {
+				String name = base + suffix;
+				builder.add(name, UniformShape.MAT4, (w,o) -> o.set(dev.vitrail.voxy.VoxyBridge.matrix(name)));
+			}
+		}
 		builder.add("dhProjection", UniformShape.MAT4, (world, out) -> out.set(world.dhProjection()));
 		builder.add("dhProjectionInverse", UniformShape.MAT4,
 				(world, out) -> out.set(world.dhProjectionInverse()));

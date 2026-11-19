@@ -79,7 +79,7 @@ if (project.minecraft_version == "26.3") {
     repositories { maven { url = "https://maven.caffeinemc.net/releases" } }
     sourceSets {
         sodiumProbe {
-            compileClasspath += sourceSets.main.compileClasspath
+            compileClasspath += sourceSets.main.compileClasspath + project(":common").sourceSets.main.output
             runtimeClasspath += compileClasspath + sourceSets.main.runtimeClasspath
         }
     }
@@ -95,6 +95,9 @@ if (project.minecraft_version == "26.3") {
         workingDir = layout.buildDirectory.dir("sodium-probe-run")
         doFirst {
             workingDir.mkdirs()
+            if (project.hasProperty("voxyProbe")) {
+                systemProperty "voxy.probe.classes", sourceSets.sodiumProbe.output.classesDirs.singleFile.absolutePath
+            }
             sourceSets.sodiumProbe.output.resourcesDir.mkdirs()
             systemProperty "fabric.development", "true"
             systemProperty "fabric.addMods", tasks.named("jar").get().archiveFile.get().asFile.absolutePath

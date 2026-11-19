@@ -265,6 +265,9 @@ public final class EngineStages {
 		// and before the deferred stage below reads it: this boundary is where Iris takes its own
 		// copy without the translucent LODs. PackChain.takeDistantDepth says what the frames
 		// without a far terrain read instead.
+		// Solas deferred1 consumes colortex7 and both LOD depths before vanilla translucency.
+		PackChain.voxyDraw(dev.vitrail.voxy.VoxyBridge.Stage.OPAQUE);
+		PackChain.voxyDraw(dev.vitrail.voxy.VoxyBridge.Stage.TRANSLUCENT);
 		PackChain.takeDistantDepth();
 
 		// Then the depth the pack reads past the hand with, which has to be taken while the hand is

@@ -10,6 +10,10 @@ public final class KnotProbe {
 	public static void main(String[] args) throws Exception {
 		Knot knot = new Knot(EnvType.CLIENT);
 		ClassLoader loader = knot.init(new String[] {"--gameDir", Path.of(".").toAbsolutePath().toString()});
+		if (System.getProperty("voxy.probe.classes") != null) {
+			knot.addToClassPath(Path.of(System.getProperty("voxy.probe.classes")));
+			loader.loadClass("dev.vitrail.render.VoxyGpuProbe").getMethod("run").invoke(null);
+		}
 		for (String name : new String[] {
 			"net.caffeinemc.mods.sodium.client.render.chunk.ShaderChunkRenderer",
 			"net.caffeinemc.mods.sodium.client.render.chunk.DefaultChunkRenderer",
