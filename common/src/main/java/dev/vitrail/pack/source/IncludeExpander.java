@@ -214,6 +214,13 @@ public final class IncludeExpander {
 		return List.copyOf(this.loose);
 	}
 
+	/** Configuration files can themselves include GLSL option declarations and other JSON files. */
+	public ExpandedUnit expandConfiguration(Path entry, Map<String,String> environment) throws IOException {
+		State state = new State(environment, this.loose);
+		expandFile(entry, 0, state);
+		return new ExpandedUnit(source.rel(entry), state.output, state.version, state.toStats(), state.live, state.defines);
+	}
+
 	/** Expand an inline stage relative to its owning configuration file. */
 	public String expandInline(Path owner, String text) throws IOException {
 		State state = new State(startingDefines(this.source.rel(owner)), this.loose);

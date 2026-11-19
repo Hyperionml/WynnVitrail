@@ -104,7 +104,8 @@ public abstract class VulkanRenderPassMixin {
 		if ((bound != null && bound.storage())
 				|| (name != null && TargetName.imageIndex(name).isPresent())) {
 			sampler = 0L;
-		} else if (ShadowCompare.noted() && name != null && vitrail$compared().contains(name)) {
+		} else if (name != null && (dev.vitrail.voxy.VoxyBridge.comparisonSampler(name)
+				|| (ShadowCompare.noted() && vitrail$compared().contains(name)))) {
 			// Behind the one flag, as on 26.2: until the first pack that compares is loaded, every
 			// pass of the game's own pays a volatile read here and nothing else.
 			sampler = ShadowCompare.sampler(this.device);

@@ -63,6 +63,7 @@ sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 
 tasks.named("test", Test).configure {
 	if (project.hasProperty("solasVoxyPack")) systemProperty "solasVoxyPack", project.property("solasVoxyPack")
+	if (project.hasProperty("voxyCorpus")) systemProperty "voxyCorpus", project.property("voxyCorpus")
 	useJUnitPlatform()
 	classpath += sourceSets.main.runtimeClasspath
 

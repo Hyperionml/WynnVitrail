@@ -38,6 +38,11 @@ public final class VoxyBridge {
         default void invalidate() {}
     }
     private static Provider provider;
+    private static VoxyPatch recordingPatch;
+
+    public static boolean comparisonSampler(String name) {
+        return recordingPatch != null && "sampler2DShadow".equals(recordingPatch.samplers().get(name));
+    }
     private static boolean reload;
     private static volatile boolean macro;
     private static boolean enabled;
@@ -101,9 +106,14 @@ public final class VoxyBridge {
     public static float far() { return camera == null ? 0 : camera.far(); }
     public static void draw(Draw draw) {
         if (!requested() || camera == null) return;
-        var view = provider.draw(draw);
-        if (draw.stage() == Stage.OPAQUE) opaque = view;
-        else translucent = view;
+        recordingPatch = draw.frame() == null ? null : draw.frame().patch();
+        try {
+            var view = provider.draw(draw);
+            if (draw.stage() == Stage.OPAQUE) opaque = view;
+            else translucent = view;
+        } finally {
+            recordingPatch = null;
+        }
     }
     public static GpuTextureView depth(String name) {
         return name.equals("vxDepthTexOpaque") || translucent == null ? opaque : translucent;

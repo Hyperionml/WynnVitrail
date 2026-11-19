@@ -33,12 +33,12 @@ var registration = VoxyBridge.register(VoxyBridge.VERSION, new VoxyBridge.Provid
 - `draw.samplerNames()` 按配置顺序返回名称。`GraphicsApi.blockAndSamplers(blockName, draw.samplerNames())` 可创建描述符布局，块在首位，后面是按顺序排列的组合图像采样器。按相同名称绑定 `draw.sampler().apply(name)`。Solas 使用场景深度、阴影、噪声、gaux 和远景深度。远景半透明深度在生成之前回退到不透明深度，两者都未生成时采样远平面。
 - `Frame.uniforms()` 含标准值及当前包的自定义表达式。提供方从最终 GLSL 收集块成员，用 `frame.uniformBlock(members)` 建 std140 布局，在绘制阶段调用 `block.write(sink, frame.camera())`。可通过 `block.unanswered()` 检查缺少的数据。按 `frame.material(blockState)` 设置片元的 customId，材质缓存以 `materialGeneration()` 与 load 标识。
 - `patch.opaqueSource()/translucentSource()` 已展开 include 并应用包选项。按 `shaderDefines()` 设置编译环境。提供方定义与 Voxy 一致的 `VoxyFragmentParameters`（sampledColour、tile、uv、face、modelId、lightMap、tinting、customId），拼接并调用 `voxy_emitFragment`，负责最终 Vulkan 着色器编译及顶点输入。将 `taaOffset()` 作为抖动函数体，使用当前渲染视口和相同帧序号，在 LOD 顶点阶段施加一次。空函数体按零偏移处理。
-- 当前实现以 Solas 3.9 为验收包。未实现的字段包括 ssbos、renderScale、useViewportDims、skipShaderDepthHackFix、useDynamicFarPlane。遇到这些字段会记录包名、维度和字段并关闭该包的 Voxy 扩展。
+- 维度入口可通过 include 共享配置，配置引用的 GLSL 设置参与条件分支。`viewOptions()` 提供 renderScale、useViewportDims、skipShaderDepthHackFix 和 useDynamicFarPlane，供 Voxy 创建视口和投影时使用。请求非空 ssbos 的包仍会收到明确的绑定能力错误。
 
 ## 验证命令
 
 ```powershell
-./gradlew.bat build :fabric:sodiumMixinProbe -PvoxyProbe "-PsolasVoxyPack=<Solas 3.9 解压目录>"
+./gradlew.bat build :fabric:sodiumMixinProbe -PvoxyProbe "-PsolasVoxyPack=<Solas 3.9 解压目录>" "-PvoxyCorpus=<Complementary、BSL、Photon ZIP 所在目录>"
 ```
 
 原文件测试覆盖三个维度。无窗口 GPU 探针用固定三角形验证 MRT、独立混合、近景遮挡、两份远景深度回读以及两种尺寸下的重新注册。真实 LOD 的剔除、材质和水面接缝需要 Voxy Vulkan 提供方接入后进游戏联测。

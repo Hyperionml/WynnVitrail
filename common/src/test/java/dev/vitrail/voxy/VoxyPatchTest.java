@@ -10,6 +10,28 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class VoxyPatchTest {
+    @Test void modrinthPacks() throws Exception {
+        String directory = System.getProperty("voxyCorpus");
+        assumeTrue(directory != null);
+        try (var files = java.nio.file.Files.list(Path.of(directory))) {
+            var packs = files.filter(p -> p.toString().endsWith(".zip")).sorted().toList();
+            assertFalse(packs.isEmpty());
+            for (Path path : packs) {
+                VoxyBridge.macro(true);
+                try (var opened = OpenedPack.open(path.toRealPath(), Map.of(), "")) {
+                    var dimensions = dev.vitrail.pack.source.DimensionSet.discover(opened.source());
+                    for (String world : List.of("minecraft:overworld","minecraft:the_nether","minecraft:the_end")) {
+                        var patch = VoxyPatch.read(opened,dimensions.place(world));
+                        assertNotNull(patch, path + " " + world);
+                        assertTrue(patch.opaqueSource().contains("voxy_emitFragment"), path.toString());
+                        assertFalse(patch.uniforms().isEmpty());
+                        assertTrue(patch.samplers().containsKey("noisetex"));
+                    }
+                } finally { VoxyBridge.macro(false); }
+            }
+        }
+    }
+
     @Test void solasDimensions() throws Exception {
         String path = System.getProperty("solasVoxyPack");
         assumeTrue(path != null);
@@ -51,10 +73,39 @@ class VoxyPatchTest {
             assertEquals("ONE",patch.translucentBlend(1).orElseThrow().srcRgb());
             assertNull(VoxyPatch.read(opened,"world1"));
         }
-        java.nio.file.Files.writeString(config,body.replace("\"uniforms\":[]","\"ssbos\":{},\"uniforms\":[]"));
+        java.nio.file.Files.writeString(config,body.replace("\"uniforms\":[]","\"ssbos\":{0:\"binding\"},\"uniforms\":[]"));
         try (var opened = OpenedPack.open(pack,Map.of(),"")) {
             var failure = assertThrows(java.io.IOException.class,() -> VoxyPatch.read(opened,""));
             assertTrue(failure.getMessage().contains("unsupported field ssbos"));
+        }
+    }
+
+    @Test void forwardedConfigUsesSettingsFromSharedInclude(@org.junit.jupiter.api.io.TempDir Path pack) throws Exception {
+        Path shaders = java.nio.file.Files.createDirectory(pack.resolve("shaders"));
+        Path world = java.nio.file.Files.createDirectory(shaders.resolve("world0"));
+        java.nio.file.Files.writeString(world.resolve("voxy.json"), "#include \"/common.json\"");
+        java.nio.file.Files.writeString(shaders.resolve("settings.glsl"), "#define LOCAL_SCALE 0.75\n");
+        java.nio.file.Files.writeString(shaders.resolve("common.json"), """
+                {
+                    "unusedString": "
+                        // An author's "quoted" note with a \\backslash.
+                        #include "settings.glsl"
+                    ",
+                    "version":1, "uniforms":[], "opaqueDrawBuffers":[0], "translucentDrawBuffers":[1],
+                    "opaquePatchData":"void voxy_emitFragment() {}",
+                    "samplers":{"shadowtex0":"sampler2DShadow", "tex":"sampler2D"},
+                    #ifdef LOCAL_SCALE
+                    "renderScale":[LOCAL_SCALE], "useViewportDims":true,
+                    #endif
+                    "taaOffset":"{ return vec2(0); }"
+                }
+                """);
+        try (var opened = OpenedPack.open(pack,Map.of(),"")) {
+            var patch = VoxyPatch.read(opened,"world0");
+            assertEquals(0.75f,patch.viewOptions().scaleX());
+            assertEquals(0.75f,patch.viewOptions().scaleY());
+            assertTrue(patch.viewOptions().useViewportDims());
+            assertEquals("sampler2DShadow",patch.samplers().get("shadowtex0"));
         }
     }
 

@@ -3465,19 +3465,33 @@ public final class PackChain {
 	}
 
 	private GpuTextureView voxySampler(String name) {
+		var supplied = targets.packTexture(dev.vitrail.pack.model.TextureStage.GBUFFERS, name);
+		if (supplied != null) return supplied.view();
 		var color = dev.vitrail.pack.model.TargetName.index(name);
-		if (color.isPresent()) return targets.view(color.getAsInt(), voxySide(color.getAsInt()));
+		if (color.isPresent()) {
+			var view = targets.view(color.getAsInt(), voxySide(color.getAsInt()));
+			return view == null ? targets.black() : view;
+		}
+		if (SamplerPlan.isShadowColour(name)) {
+			var view = targets.shadow().colour(SamplerPlan.shadowColour(name));
+			return view == null ? targets.white() : view;
+		}
+		var kind = SamplerPlan.classify(name);
+		if (kind == SamplerPlan.Kind.DEPTH) return targets.depth().scene();
+		if (kind == SamplerPlan.Kind.SHADOW_DEPTH || name.equals("shadowtex")) {
+			var depth = SamplerPlan.withoutTranslucents(name, voxyPatch.samplers().containsKey("watershadow"))
+					? targets.shadow().depthWithoutTranslucents() : targets.shadow().depth();
+			if (depth != null) return depth;
+			var far = ConstantTextures.farPlaneIfReady();
+			return far != null ? far : targets.white();
+		}
 		var view = switch (name) {
-			case "depthtex0", "depthtex1" -> targets.depth().scene();
+			case "tex" -> Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(net.minecraft.data.AtlasIds.BLOCKS).getTextureView();
 			case "noisetex" -> targets.noise();
-			case "shadowtex0" -> targets.shadow().depth();
-			case "shadowtex1" -> targets.shadow().depthWithoutTranslucents();
-			case "shadowcolor0" -> targets.shadow().colour(0);
-
 			case "vxDepthTexTrans", "vxDepthTexOpaque" -> VoxyBridge.depth(name);
-			case "dhDepthTex0" -> targets.depth().distantScene();
+			case "dhDepthTex", "dhDepthTex0" -> targets.depth().distantScene();
 			case "dhDepthTex1" -> targets.depth().distantOpaque();
-			default -> throw new IllegalArgumentException("Unknown Voxy sampler " + name);
+			default -> targets.black(); // A declared pack image could not be allocated.
 		};
 		return view == null ? targets.white() : view;
 	}
